@@ -1,0 +1,69 @@
+//! Bimo wiring and board-level setup
+use esp_hal::{
+    Blocking,
+    gpio::{Input, InputConfig, Level, Output, OutputConfig},
+    i2c::master::{Config, I2c, SoftwareTimeout},
+    peripherals::{FROM_CPU_INTR0, LEDC, Peripherals, TIMG0},
+    time::{Duration, Rate},
+};
+
+pub const QMC5883L_ADDRESS: u8 = 0x0D;
+pub const AHT20_ADDRESS: u8 = 0x38;
+
+pub struct Board {
+    pub timer_group: TIMG0<'static>,
+    pub rtos_interrupt: FROM_CPU_INTR0<'static>,
+    pub ledc: LEDC<'static>,
+    pub buzzer: Output<'static>,
+    pub i2c: I2c<'static, Blocking>,
+    pub inactive_outputs: InactiveOutputs,
+    pub bmi160_int1: Input<'static>,
+    pub qmc5883l_drdy: Input<'static>,
+}
+
+/// Private outputs remain low; no PWM or direction control is exposed.
+pub struct InactiveOutputs {
+    _ena: Output<'static>,
+    _enb: Output<'static>,
+    _in1: Output<'static>,
+    _in2: Output<'static>,
+    _in3: Output<'static>,
+    _in4: Output<'static>,
+}
+
+impl Board {
+    /// Call immediately after HAL init, before allocation, RTOS or bus setup.
+    pub fn init(p: Peripherals) -> Self {
+        // Enables first. External pull-downs / hardware gating are required
+        // for reset and pre-boot safety; software cannot provide that guarantee.
+        let outputs = InactiveOutputs {
+            _ena: Output::new(p.GPIO16, Level::Low, OutputConfig::default()),
+            _enb: Output::new(p.GPIO17, Level::Low, OutputConfig::default()),
+            _in1: Output::new(p.GPIO5, Level::Low, OutputConfig::default()),
+            _in2: Output::new(p.GPIO6, Level::Low, OutputConfig::default()),
+            _in3: Output::new(p.GPIO7, Level::Low, OutputConfig::default()),
+            _in4: Output::new(p.GPIO15, Level::Low, OutputConfig::default()),
+        };
+        let buzzer = Output::new(p.GPIO21, Level::High, OutputConfig::default());
+        let i2c = I2c::new(
+            p.I2C0,
+            Config::default()
+                .with_frequency(Rate::from_khz(100))
+                .with_software_timeout(SoftwareTimeout::Transaction(Duration::from_millis(20))),
+        )
+        .expect("I2C configuration")
+        .with_sda(p.GPIO14)
+        .with_scl(p.GPIO13);
+
+        Self {
+            timer_group: p.TIMG0,
+            rtos_interrupt: p.FROM_CPU_INTR0,
+            ledc: p.LEDC,
+            buzzer,
+            i2c,
+            inactive_outputs: outputs,
+            bmi160_int1: Input::new(p.GPIO41, InputConfig::default()),
+            qmc5883l_drdy: Input::new(p.GPIO12, InputConfig::default()),
+        }
+    }
+}
