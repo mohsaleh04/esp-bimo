@@ -3,10 +3,20 @@ edition = "2024"
 name = "esp-bimo"
 rust-version = "1.95"
 version = "0.1.0"
+default-run = "esp-bimo"
 
 [[bin]]
 name = "esp-bimo"
 path = "./src/bin/main.rs"
+
+[features]
+default = []
+motor-test = []
+
+[[bin]]
+name = "motor-test"
+path = "src/bin/motor_test.rs"
+required-features = ["motor-test"]
 
 [dependencies]
 esp-hal = { version = "~1.2.2", features = ["esp32s3", "log-04", "unstable"] }

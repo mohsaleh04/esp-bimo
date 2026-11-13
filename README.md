@@ -1,4 +1,14 @@
-# Bimo — milestone 1
+# Bimo — Milestone 2
+
+The normal firmware now owns a disarmed L298N dual-motor driver; it never
+commands movement. See [motor API, safety checks and opt-in test procedure](docs/motors.md).
+The separate `motor-test` feature/binary automatically pulses channel A once
+after a 3-second boot wait. No board was flashed or motor test run by the agent.
+
+The following Milestone 1 notes describe the original bring-up; current
+Milestone 2 behavior and safety details are in the motor document above.
+
+## Milestone 1 bring-up notes
 
 Independent `no_std` / `no_main` Rust firmware for ESP32-S3 N16R8.
 This milestone exercises the shared I²C bus and BMI160 only. No PID, motor

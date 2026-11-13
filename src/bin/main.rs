@@ -33,7 +33,12 @@ async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(config);
 
     let board = Board::init(peripherals);
-    let _inactive_outputs = board.inactive_outputs;
+    // No arm() or nonzero commands in normal firmware.
+    let _motors = esp_bimo::motors::l298n::L298n::new(
+        board.motor_pwm,
+        board.inactive_outputs,
+        esp_bimo::motors::DutyLimit::new(30).expect("motor duty limit"),
+    );
     let _bmi160_int1 = board.bmi160_int1;
     let _qmc5883l_drdy = board.qmc5883l_drdy;
     let mut bus = board.i2c;
@@ -45,7 +50,7 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(esp_bimo::buzzer::play(board.ledc, board.buzzer).expect("buzzer task"));
 
-    info!("Bimo milestone 1: motor enables/directions LOW; servo unused");
+    info!("Bimo milestone 2: motors DISARMED, enables/directions LOW; servo unused");
     // --- Founding I2C Devices
     info!("[I2C] I2C0: SDA=14 SCL=13, 100 kHz; Scanning from 0x08 to 0x77");
     Timer::after_millis(100).await;
@@ -82,7 +87,9 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     loop {
-        if _bmi160_int1.is_high() && let Some(imu) = imu.as_mut() {
+        if _bmi160_int1.is_high()
+            && let Some(imu) = imu.as_mut()
+        {
             match imu.read(&mut bus) {
                 Ok(Some(sample)) => {
                     let a = sample.accel_m_s2();

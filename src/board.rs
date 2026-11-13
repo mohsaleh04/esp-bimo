@@ -3,7 +3,7 @@ use esp_hal::{
     Blocking,
     gpio::{Input, InputConfig, Level, Output, OutputConfig},
     i2c::master::{Config, I2c, SoftwareTimeout},
-    peripherals::{FROM_CPU_INTR0, LEDC, Peripherals, TIMG0},
+    peripherals::{FROM_CPU_INTR0, LEDC, MCPWM0, Peripherals, TIMG0},
     time::{Duration, Rate},
 };
 
@@ -14,6 +14,7 @@ pub struct Board {
     pub timer_group: TIMG0<'static>,
     pub rtos_interrupt: FROM_CPU_INTR0<'static>,
     pub ledc: LEDC<'static>,
+    pub motor_pwm: MCPWM0<'static>,
     pub buzzer: Output<'static>,
     pub i2c: I2c<'static, Blocking>,
     pub inactive_outputs: InactiveOutputs,
@@ -21,14 +22,14 @@ pub struct Board {
     pub qmc5883l_drdy: Input<'static>,
 }
 
-/// Private outputs remain low; no PWM or direction control is exposed.
+/// Initial inactive state. Move this entire owner into L298n; never recreate pins.
 pub struct InactiveOutputs {
-    _ena: Output<'static>,
-    _enb: Output<'static>,
-    _in1: Output<'static>,
-    _in2: Output<'static>,
-    _in3: Output<'static>,
-    _in4: Output<'static>,
+    pub(crate) ena: Output<'static>,
+    pub(crate) enb: Output<'static>,
+    pub(crate) in1: Output<'static>,
+    pub(crate) in2: Output<'static>,
+    pub(crate) in3: Output<'static>,
+    pub(crate) in4: Output<'static>,
 }
 
 impl Board {
@@ -37,12 +38,12 @@ impl Board {
         // Enables first. External pull-downs / hardware gating are required
         // for reset and pre-boot safety; software cannot provide that guarantee.
         let outputs = InactiveOutputs {
-            _ena: Output::new(p.GPIO16, Level::Low, OutputConfig::default()),
-            _enb: Output::new(p.GPIO17, Level::Low, OutputConfig::default()),
-            _in1: Output::new(p.GPIO5, Level::Low, OutputConfig::default()),
-            _in2: Output::new(p.GPIO6, Level::Low, OutputConfig::default()),
-            _in3: Output::new(p.GPIO7, Level::Low, OutputConfig::default()),
-            _in4: Output::new(p.GPIO15, Level::Low, OutputConfig::default()),
+            ena: Output::new(p.GPIO16, Level::Low, OutputConfig::default()),
+            enb: Output::new(p.GPIO17, Level::Low, OutputConfig::default()),
+            in1: Output::new(p.GPIO5, Level::Low, OutputConfig::default()),
+            in2: Output::new(p.GPIO6, Level::Low, OutputConfig::default()),
+            in3: Output::new(p.GPIO7, Level::Low, OutputConfig::default()),
+            in4: Output::new(p.GPIO15, Level::Low, OutputConfig::default()),
         };
         let buzzer = Output::new(p.GPIO21, Level::High, OutputConfig::default());
         let i2c = I2c::new(
@@ -59,6 +60,7 @@ impl Board {
             timer_group: p.TIMG0,
             rtos_interrupt: p.FROM_CPU_INTR0,
             ledc: p.LEDC,
+            motor_pwm: p.MCPWM0,
             buzzer,
             i2c,
             inactive_outputs: outputs,
