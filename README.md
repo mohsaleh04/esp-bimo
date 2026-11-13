@@ -346,3 +346,62 @@ report `dry_u=None`; DRY resumes calculations when valid samples return.
 Live ACTIVE retains all tilt, freshness, timing, and estimate validity protections.
 Returning upright or sending DRY/ARM does not clear a live fault: send `STOP` or
 `RESET` explicitly, then complete a new upright dwell before ARM.
+
+### Separate PWM startup diagnostic
+
+`motor-pwm-diagnostic` is an output-only, one-shot test using the existing L298N
+MCPWM driver and wiring. It does not measure a startup threshold automatically:
+without encoders, the operator must record whether each wheel starts turning.
+A negative result means only that the tested pulse/duty did not start it.
+
+Before manually running, suspend and secure both wheels, keep a motor-power
+cutoff within reach, and verify common ground and valid L298N logic supply.
+The current 9 V supply exceeds the motors' 6 V rating; a PWM ceiling does not
+limit instantaneous voltage or guarantee safe current/temperature. Avoid stalls.
+Software cannot guarantee reset-time GPIO levels or stop a pulse during a CPU
+hang; use external enable pull-downs/gating for that guarantee.
+
+Configuration is at the top of `src/bin/motor_pwm_diagnostic.rs`: a 15-second
+preparation delay and a 30% conservative ceiling. Set `RUNNING_START_A_PERCENT`
+and `RUNNING_START_B_PERCENT` to individually verified safe spinning duties;
+the 30% defaults are placeholders, not experimentally verified thresholds.
+Do not raise the ceiling on the current supply without verifying motor safety.
+
+For A/right first, the running test holds its configured starting duty for one
+second, then reduces it by 5 percentage points every second down to 5%.
+It does not deliberately stop between running steps, though the reused driver
+briefly detaches enables during command updates (about 1.2 ms). Logging and
+scheduling add small timing overhead. Observe when the wheel stops; if it never
+started, this is not a valid running-threshold measurement.
+
+Both motors are then disarmed for a 2-second coast pause. Starting attempts run
+from 5% through the configured ceiling in 5-point increments, each with a 250 ms
+pulse followed by stop/disarm and a 2-second pause. Increase the pause if a wheel
+has not fully stopped; no encoder can confirm standstill. A failed attempt means
+only that the tested duty/pulse did not start that wheel under those conditions.
+There is no boost or automatic detection, and later attempts still run after
+visible motion begins. After A finishes, both motors remain disabled for an
+additional 3 seconds before the same sequence runs for B/left. They are never
+commanded together. Forward polarity remains A negative and B positive.
+
+The starting duties, lower bound, step size, pulse duration, and pauses are named
+constants. Bounds/alignment are checked at compile time; 100% is rejected.
+All tests run once, followed by unconditional stop/disarm and permanent idle.
+Reset repeats the sequence. The running test includes logging while energized;
+a blocked log, CPU hang, or executor stall can delay shutdown. Keep the physical
+motor-power cutoff accessible throughout.
+
+Build without flashing:
+
+```sh
+cargo build --release --locked --features motor-pwm-diagnostic --bin motor-pwm-diagnostic
+```
+
+Only when ready for the physical test, manually flash/run:
+
+```sh
+cargo run --release --locked --features motor-pwm-diagnostic --bin motor-pwm-diagnostic
+```
+
+No serial commands are needed. Logs identify phase, signed commands, effective
+duty, stopping, and completion. No movement is claimed by the firmware.
