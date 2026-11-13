@@ -32,7 +32,7 @@ impl DutyLimit {
         if percent <= 100 {
             Some(Self(percent))
         } else {
-            None
+            Some(Self(100))
         }
     }
 

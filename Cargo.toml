@@ -12,6 +12,7 @@ path = "./src/bin/main.rs"
 [features]
 default = []
 motor-test = []
+orientation-diagnostic = []
 
 [[bin]]
 name = "motor-test"
@@ -23,7 +24,13 @@ name = "motor-pwm-test"
 path = "src/bin/motor_pwm_test.rs"
 required-features = ["motor-test"]
 
+[[bin]]
+name = "orientation-diagnostic"
+path = "src/bin/orientation_diagnostic.rs"
+required-features = ["orientation-diagnostic"]
+
 [dependencies]
+libm = "=0.2.16"
 esp-hal = { version = "~1.2.2", features = ["esp32s3", "log-04", "unstable"] }
 
 esp-rtos = { version = "0.4.0", features = [

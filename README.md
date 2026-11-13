@@ -1,5 +1,7 @@
 # Bimo — Milestone 2
 
+Phase 2 sensor-only work: [orientation and axis-identification diagnostic](docs/orientation.md).
+
 The normal firmware now owns a disarmed L298N dual-motor driver; it never
 commands movement. See [motor API, safety checks and opt-in test procedure](docs/motors.md).
 The separate `motor-test` feature/binary automatically pulses channel A once
