@@ -28,11 +28,11 @@ pub struct Drive {
 pub struct DutyLimit(u8);
 
 impl DutyLimit {
-    pub const fn new(percent: u8) -> Option<Self> {
+    pub const fn new(percent: u8) -> Self {
         if percent <= 100 {
-            Some(Self(percent))
+            Self(percent)
         } else {
-            Some(Self(100))
+            Self(100)
         }
     }
 

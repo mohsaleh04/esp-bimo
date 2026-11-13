@@ -37,7 +37,7 @@ async fn main(spawner: Spawner) -> ! {
     let _motors = esp_bimo::motors::l298n::L298n::new(
         board.motor_pwm,
         board.inactive_outputs,
-        esp_bimo::motors::DutyLimit::new(30).expect("motor duty limit"),
+        esp_bimo::motors::DutyLimit::new(30),
     );
     let _bmi160_int1 = board.bmi160_int1;
     let _qmc5883l_drdy = board.qmc5883l_drdy;

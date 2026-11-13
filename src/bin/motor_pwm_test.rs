@@ -22,7 +22,7 @@ async fn main(_spawner: Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let board = Board::init(p);
-    let limit = DutyLimit::new(100).expect("diagnostic duty limit");
+    let limit = DutyLimit::new(100);
     let effective = limit.map(100);
     assert_eq!(effective.duty_percent, 100, "100% must not be clamped");
     assert_eq!(effective.direction.inputs(), (true, false)); // IN1 HIGH, IN2 LOW
