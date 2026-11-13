@@ -57,6 +57,26 @@ fn wrap(deg: f32) -> f32 {
     r - 180.0
 }
 
+/// Why an accelerometer update is unsuitable as a gravity-based pitch correction.
+/// Values/limits are in m/s². This is not by itself an invalid gyro estimate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AccelRejection {
+    NonFinite,
+    Magnitude {
+        measured: f32,
+        minimum: f32,
+        maximum: f32,
+    },
+    Sideways {
+        measured: f32,
+        maximum: f32,
+    },
+    PitchPlane {
+        measured: f32,
+        minimum: f32,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PitchFrame {
     /// Unit gravity vector measured while the body is held upright.
@@ -85,16 +105,40 @@ impl PitchFrame {
         Some(Self { up, tilt, axis })
     }
 
-    pub fn accel_angle(&self, a: Vector) -> Option<f32> {
-        if !gravity_valid(a) || a.dot(self.axis).abs() > 0.35 * GRAVITY {
-            return None;
+    /// Diagnostic form of the existing gates; thresholds/math are unchanged.
+    pub fn accel_rejection(&self, a: Vector) -> Option<AccelRejection> {
+        if !a.finite() {
+            return Some(AccelRejection::NonFinite);
+        }
+        if !gravity_valid(a) {
+            return Some(AccelRejection::Magnitude {
+                measured: a.norm(),
+                minimum: 0.85 * GRAVITY,
+                maximum: 1.15 * GRAVITY,
+            });
+        }
+        let sideways = a.dot(self.axis).abs();
+        if sideways > 0.35 * GRAVITY {
+            return Some(AccelRejection::Sideways {
+                measured: sideways,
+                maximum: 0.35 * GRAVITY,
+            });
         }
         let x = a.dot(self.tilt);
         let z = a.dot(self.up);
         if x * x + z * z < (0.5 * GRAVITY) * (0.5 * GRAVITY) {
+            return Some(AccelRejection::PitchPlane {
+                measured: libm::sqrtf(x * x + z * z),
+                minimum: 0.5 * GRAVITY,
+            });
+        }
+        None
+    }
+    pub fn accel_angle(&self, a: Vector) -> Option<f32> {
+        if self.accel_rejection(a).is_some() {
             return None;
         }
-        Some(libm::atan2f(x, z).to_degrees())
+        Some(libm::atan2f(a.dot(self.tilt), a.dot(self.up)).to_degrees())
     }
     pub fn rate(&self, corrected_gyro_dps: Vector) -> f32 {
         corrected_gyro_dps.dot(self.axis)

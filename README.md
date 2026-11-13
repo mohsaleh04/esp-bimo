@@ -601,8 +601,9 @@ Constants at the top of `src/bin/balance_motor_response_test.rs`:
 | --- | --- |
 | `SUPPLY_AND_CEILING_VERIFIED` | **false**, blocks real movement even with live feature |
 | `MOTOR_DUTY_CEILING` | 70%; both ordinary mapping and kick validated against this |
-| `WINDOW_US` | 2,000,000 us maximum from readiness arming, including neutral wait |
+| `WINDOW_US` | 5,000,000 us maximum from post-ready neutral acceptance into ACTIVE |
 | `PREPARATION_SECS` | 15 seconds after BOTH calibration poses complete |
+| `ARMING_TIMEOUT_US` | 10,000,000 us after preparation, covering readiness + neutral wait |
 | `MAX_LOOP_GAP_US` | 30,000 us; active loop gap/work over this faults |
 | Ordinary PD limit | ±15, asserted to match mapping input limit |
 | Proportional mapping | deadband=2, minimum=30%, maximum=50%, slew disabled |
@@ -630,15 +631,16 @@ Exact activation sequence:
 4. Without BOTH the diagnostic-specific live feature and source safety flag,
    remain DRY permanently. Neither `balance-live` nor a predicted kick can arm.
 5. With both gates explicitly enabled, fresh valid estimates establish the
-   existing 500 ms upright/low-rate readiness dwell. This automatically arms
-   **one** supported-wheel trial; no serial input is required. Output on the
-   arming frame is zero; the two-second timer starts here.
-6. A fresh **post-arm** neutral/deadband command is required. Until then outputs
-   remain zero. A subsequent meaningful LIMITED PD request can trigger the
-   existing kick; no forced pulse happens at arming. Small commands outside the
-   deadband but below the trigger use ordinary proportional PWM without a kick.
+   existing 500 ms upright/low-rate readiness dwell. This enters
+   `ArmedWaitingForNeutral`; motors remain physically disarmed. Readiness and
+   neutral waiting share a 10-second deadline starting after preparation.
+6. A NEW post-readiness sample must have LIMITED PD within +/-2 AND current
+   readiness still valid. Only then enter `Active`, start the five-second timer,
+   and arm the driver at zero. The acceptance frame cannot kick. A subsequent
+   meaningful LIMITED PD request can trigger the existing kick. Holding a
+   non-neutral pose does not consume ACTIVE time; it can hit `ArmingTimeout`.
 7. Zero cancels the kick; reversals follow the existing zero-pause/cooldown rules.
-   Cutoff, invalid data (including gyro-only estimates in LIVE), read errors,
+   Cutoff, invalid data (including gyro-only estimates outside the bounded ACTIVE policy), read errors,
    timing/stale faults, motor errors or window expiration cancel mapping/kick,
    disarm and permanently end the trial. Raising the robot upright cannot rearm.
    Reset is required for another run, including calibration and preparation.
@@ -668,8 +670,8 @@ cargo run --release --locked --features balance-motor-response-live --bin balanc
 ```
 
 Follow calibration prompts, secure support during the preparation interval, then
-hold upright/low-rate. Expect readiness to start the short window automatically.
-Hold neutral first, then lean gently within about ±10° and visually verify that
+hold upright/low-rate. Readiness enters a bounded neutral wait, not ACTIVE.
+Hold neutral (limited PD within +/-2) to start the short window, then lean gently within about ±10° and visually verify that
 positive pitch/request produces the physical forward wheel directions via
 A/LEFT negative and B/RIGHT positive. Cut motor power if signs are wrong. Do not
 attempt ground-contact or free-standing balancing with this firmware.
@@ -725,8 +727,7 @@ The final motor-output gate now checks current elapsed time/freshness itself.
 Actual commands are issued only for a new accepted estimate, with a fresh
 orientation and ACTIVE state, while valid previous output can persist between
 normal empty polls. The no-new-sample path checks work deadlines too. Exceeding
-40 ms, missed active deadlines, sensor read failure, invalid/gyro-only LIVE
-estimates, timeout, and >=15° tilt retain immediate software disarm/lockout.
+40 ms, missed active deadlines, sensor read failure, invalid LIVE estimates or correction-age expiry, timeout, and >=15° tilt retain immediate software disarm/lockout.
 “Immediate” means when execution detects the event; a CPU stall still requires
 hardware protection. No freshness/deadline thresholds were relaxed.
 
@@ -746,3 +747,135 @@ upright plus correct calculated signs during gentle tilt. Resolve real timing
 misses first. `SUPPLY_AND_CEILING_VERIFIED` remains **false**, and all source/
 feature/post-calibration/neutral/one-shot interlocks remain in force. This change
 does not recommend enabling LIVE based solely on software tests.
+
+
+### Readiness, neutral and ACTIVE timer separation
+
+The first LIVE run held pitch near +3.88 degrees: with Kp=1 and low pitch rate,
+raw PD is about +3.88, truncated to LIMITED PD +3. Readiness allows +/-5 degrees,
+but neutral requires LIMITED PD magnitude <=2. These are different gates.
+The original policy armed the shared controller at readiness, starting both its
+2-second cap and the wrapper timer, while returning no output until a later
+neutral sample. That explains `ready=true`, PD/PWM `None`, and `TrialExpired`
+without movement. It did not indicate a sensor or motor-driver failure.
+
+Current response states are explicit in summaries and transition logs:
+
+- `WaitingForReady`: build/source opt-ins passed, waiting for 500 ms stable
+  upright with fresh gravity-valid data; motor driver stays disarmed.
+- `ArmedWaitingForNeutral`: readiness passed once; still physically disarmed.
+  Logs show actual LIMITED PD and `neutral` even though PWM is absent. A NEW
+  sample must be neutral with current readiness still true to proceed.
+- `Active`: post-ready neutral accepted. Only here is the shared controller
+  armed; the response policy’s five-second timer starts. The shared controller is
+  used in DRY mode for sample/readiness tracking, preserving its separate
+  production two-second limit. Only response `Active` can permit motor output.
+  The acceptance sample outputs zero; later movement requests drive the mapper.
+- `Disarmed`: finished due to `ArmingTimeout`, `ActiveTimeout`, safety fault or
+  stop. Motor output and kick state are disabled permanently until reset.
+- `DryRun`: the feature/source interlocks do not permit physical movement.
+
+`ARMING_TIMEOUT_US=10_000_000` begins after calibration and the 15-second
+preparation interval. It covers BOTH readiness and neutral waiting, does not
+restart when readiness fluctuates, and ends even if no sample arrives.
+`WINDOW_US=5_000_000` begins only on the fresh post-ready neutral acceptance
+sample, when motor-command eligibility starts. It includes subsequent zero
+commands: it does not wait indefinitely for the operator to request movement.
+Both timeout names and phase are logged distinctly. Neutral is still required;
+no PD gains, deadband, mapping, kick, ceiling or polarity changed.
+
+All transitions have a timestamp and reason. Waiting transitions print while
+outputs are disabled. ACTIVE and terminal transitions are buffered and printed
+after disarm, alongside the response-phase state and disarm reason. The separate
+shared controller may still be `Observe` during the logical neutral-wait stage;
+that is intentional, so its ACTIVE timer has not started prematurely.
+
+Existing >=15-degree cutoff, 40 ms freshness, invalid gyro and bounded correction-age protection, timing
+and one-shot disarm rules apply during the supervised neutral wait and ACTIVE.
+The neutral gate additionally rechecks current readiness, rather than accepting
+neutral PD caused by an unsafe angle/rate cancellation. Source verification and
+diagnostic-specific live feature remain required and retain their current user
+configuration. No firmware is flashed as part of software validation.
+
+### Accelerometer correction rejection vs invalid orientation
+
+An accelerometer is used as a gravity-direction observation only when its input
+is finite, magnitude is 0.85–1.15 g, sideways component is <=0.35 g, and the
+pitch-plane projection is >=0.5 g. `PitchFrame::accel_rejection()` now reports
+which EXISTING gate failed, with measured values and thresholds (m/s²). It is
+also used by `accel_angle`; no filter equations, gates, or calibration math were
+relaxed. Normal hand translation, sideways tilt, or motor vibration can cross a
+gate for a single sample; pure forward/backward tilt without translation need
+not. The previous log did not record enough information to identify the actual
+physical source or failing gate.
+
+`accel_used=false` means a previously initialized filter rejected the current
+accelerometer correction and instead propagated pitch with the fresh corrected
+gyroscope. It does NOT by itself mean that the returned orientation is invalid.
+The existing estimator returns no estimate for bad dt/gyro, missing initial
+gravity reference, or over 500 ms accumulated gyro-only propagation. Previously,
+the LIVE response policy additionally rejected EVERY false flag, including a
+single valid gyro-propagated sample, producing the ambiguous `Fault(Invalid)`.
+
+New response policy: **ACTIVE only**, permit gyro-propagated estimates for at
+most `MAX_GYRO_ONLY_US=50_000` since the last accepted accelerometer correction.
+This is an absolute elapsed-time limit, checked on every poll and in the final
+output gate, not a count of samples or a fresh 50 ms allowance on each rejection.
+An accepted correction at/before the deadline resets the age to zero; a correction
+arriving after it cannot revive the trial. Zero/stop/fault/disarm behavior and
+kick cancellation remain unchanged; faults clear tracking and permanently end
+the trial. The last age/fault snapshot is retained only for diagnosis. New runs
+start with no correction history.
+
+The 50 ms choice is a conservative software candidate (~5 samples at 100 Hz,
+~3 at 60 Hz), ten times shorter than the estimator's existing 500 ms fallback.
+With the existing 0.5 s filter time constant, normal 10 ms updates already weight
+integrated gyro by about 98%. A short skipped correction preserves continuity
+without treating dynamic acceleration as gravity. Constant residual gyro bias b
+would add about b*0.05 degrees over this interval; unknown vibration, clipping,
+misalignment and gyro corruption can produce larger errors. This bound is NOT a
+hardware-validated guarantee or permission for loaded/free-standing balancing.
+
+Before ACTIVE, corrected acceleration is still mandatory for readiness and the
+post-ready neutral gate. A rejection resets the initial readiness dwell, and a
+rejection in supervised `ArmedWaitingForNeutral` disarms as before. No gyro-only
+sample can enter ACTIVE. In ACTIVE all of these remain independent hard stops:
+
+- >40 ms without a fresh valid gyro/estimate, even within the 50 ms correction bound;
+- nonfinite acceleration, nonfinite raw/corrected gyro, exact gyro ADC rail
+  values (possible saturation), nonfinite pitch/rate, or no filter estimate;
+- I2C read failure, invalid sample timing, 30 ms loop deadline violation, >=15°
+  estimated tilt, ACTIVE timeout, or other existing faults.
+
+Nonfinite raw/corrected inputs and gyro clipping are checked BEFORE filter
+propagation; no grace period applies to these cases. Failed sensor reads are not
+relabelled as benign accelerometer rejection. `sensor_fault` identifies I2C,
+gyro/accel validity, missing reference, correction-age expiry, filter failure or
+sample freshness/timing separately from the response state and disarm reason.
+
+Telemetry adds `accel_used`, correction age, and measured `accel_rejection`.
+ACTIVE correction-loss/recovery transitions are captured in the same fixed
+telemetry buffer, not synchronously logged while motors are energized. If the
+buffer fills, `dropped_records` is reported. Every terminal disarm always logs its
+specific sensor fault, last measured gate failure, correction age and any I2C
+error. Threshold violations are not inferred from `accel_used` alone.
+
+State-machine timers (10 s readiness/neutral, 5 s ACTIVE), PD gains, mapping,
+kick, duty ceiling, polarity, supply flag and feature interlocks remain unchanged.
+Review new DRY diagnostics before another suspended-wheel run. Short gyro-only
+validity cannot detect all finite-but-wrong gyro data, nor translation that
+happens to pass the acceleration gates. Freshness is measured from MCU read/
+estimate timestamps, not hardware-timestamped acquisition; CPU stalls, I2C
+latency, watchdog/reset and external motor-enable safety limitations still apply.
+
+
+The response diagnostic now permits a **5-second ACTIVE window**; the separate
+**10-second readiness/neutral timeout is unchanged**. The timer still starts on
+fresh post-ready neutral acceptance, not at boot, calibration, preparation, or
+initial readiness. All terminal conditions permanently disarm until reset.
+The response policy owns this timer and enforces all sensor, >=15° tilt, timing,
+duty and kick safeguards. Its shared controller stays in `DryRun` during the
+response phase, so the production controller's unchanged `MAX_ACTIVE_US=2s`
+cannot prematurely terminate this separate experiment. The response phase,
+not that internal tracking state, gates every physical motor command. Local
+configuration validation rejects response windows longer than 5 seconds.

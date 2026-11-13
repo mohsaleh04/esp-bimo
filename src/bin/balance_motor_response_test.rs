@@ -8,7 +8,7 @@ use esp_bimo::{
     balance,
     board::Board,
     motors::{DualMotor, DutyLimit, l298n::L298n},
-    orientation::ComplementaryFilter,
+    orientation::{AccelRejection, ComplementaryFilter},
     pwm_mapping,
 };
 use esp_hal::{
@@ -21,17 +21,20 @@ use log::{info, warn};
 mod calibration;
 #[path = "balance_motor_response_test/policy.rs"]
 mod policy;
-use balance::{Fault, Settings, State, wheel_commands};
+use balance::{Fault, Settings, wheel_commands};
 use esp_bimo::motors;
-use policy::{LoopTiming, Output, Response, drive};
+use policy::{
+    DisarmReason, LoopTiming, Output, Response, ResponseState, SensorFault, drive, input_fault,
+};
 use pwm_mapping::{Config, KickConfig};
 esp_bootloader_esp_idf::esp_app_desc!();
 
 // Only for physically supported, suspended wheels. This is NOT floor balancing.
 // Review the supply/current and ceiling, then explicitly edit this flag for LIVE.
-const SUPPLY_AND_CEILING_VERIFIED: bool = false;
+const SUPPLY_AND_CEILING_VERIFIED: bool = true;
 const MOTOR_DUTY_CEILING: u8 = 70;
-const WINDOW_US: u64 = 2_000_000;
+const WINDOW_US: u64 = 30_000_000;
+const ARMING_TIMEOUT_US: u64 = 10_000_000; // After preparation; includes readiness + neutral wait.
 const PREPARATION_SECS: u64 = 15;
 const MAX_LOOP_GAP_US: u64 = 30_000;
 const PD_OUTPUT_LIMIT: i16 = 15; // Independent of ordinary PWM maximum.
@@ -60,6 +63,9 @@ struct Record {
     rate: f32,
     output: Option<Output>,
     ready: bool,
+    state: ResponseState,
+    limited_pd: Option<i16>,
+    neutral: bool,
     age_us: u64,
     dt_us: u64,
     loop_us: u64,
@@ -67,10 +73,15 @@ struct Record {
     work_us: u64,
     missed: u32,
     poll_wait: bool,
+    accel_used: bool,
+    accel_age_us: Option<u64>,
+    accel_rejection: Option<AccelRejection>,
 }
 fn log_record(r: Record) {
     let ready = r.ready;
-    let pd = r.output.map(|o| o.limited_pd);
+    let pd = r.limited_pd;
+    let state = r.state;
+    let neutral = r.neutral;
     let mapped = r.output.map(|o| o.preview.mapped_pwm);
     let kick = r.output.is_some_and(|o| o.preview.kick_active);
     let elapsed = r.output.map(|o| o.preview.kick_elapsed_ms);
@@ -78,7 +89,10 @@ fn log_record(r: Record) {
         .output
         .map_or((0, 0), |o| wheel_commands(o.preview.final_pwm as i16));
     info!(
-        "FRESH age={}us dt={}us poll_wait={} loop={}us max_loop={}us work={}us missed={} pitch={:.2} rate={:.2} ready={ready} live_tilt_ok={} PD={pd:?} PWM={mapped:?} kick={kick}/{elapsed:?}ms calc_A/LEFT={} B/RIGHT={}; motors OFF",
+        "state={state:?} neutral={neutral} accel_used={} correction_age_us={:?} accel_rejection={:?} FRESH age={}us dt={}us poll_wait={} loop={}us max_loop={}us work={}us missed={} pitch={:.2} rate={:.2} ready={ready} live_tilt_ok={} PD={pd:?} PWM={mapped:?} kick={kick}/{elapsed:?}ms calc_A/LEFT={} B/RIGHT={}; motors OFF",
+        r.accel_used,
+        r.accel_age_us,
+        r.accel_rejection,
         r.age_us,
         r.dt_us,
         r.poll_wait,
@@ -132,6 +146,7 @@ async fn main(_spawner: Spawner) -> ! {
         MOTOR_DUTY_CEILING,
         LIVE,
         WINDOW_US,
+        ARMING_TIMEOUT_US,
     ) else {
         warn!("Invalid duty/timing configuration; permanently disarmed.");
         loop {
@@ -155,28 +170,38 @@ async fn main(_spawner: Spawner) -> ! {
         }
     };
     info!(
-        "Calibration valid; motors OFF. Secure wheels; preparation {PREPARATION_SECS}s. LIVE then arms ONCE after 0.5s within +/-5deg and +/-5deg/s. After arming, first hold neutral (PD within +/-2), then tilt gently. Active telemetry prints AFTER disarm."
+        "Calibration valid; motors OFF. Secure wheels; preparation {PREPARATION_SECS}s. LIVE waits for 0.5s within +/-5deg and +/-5deg/s, then a NEW neutral sample (limited PD within +/-2). Motors stay disarmed in both waits (10s combined timeout). Only neutral acceptance starts the 5s ACTIVE window; then tilt gently. Active telemetry prints AFTER disarm."
     );
     Timer::after_secs(PREPARATION_SECS).await;
     let mut filter = ComplementaryFilter::new(0.5);
     let epoch = Instant::now();
+    response.begin(0);
+    info!(
+        "Response state={:?}; arming_timeout={ARMING_TIMEOUT_US}us begins now; ACTIVE window={WINDOW_US}us starts only on fresh post-ready neutral acceptance.",
+        response.state()
+    );
+    let mut logged_transitions = 0;
     let mut previous_sample = None;
     let mut timing = LoopTiming::default();
     let mut latest = None;
     let mut issue = "waiting for first valid estimate";
+    let mut last_accel_rejection = None;
+    let mut last_bus_error = None;
+    let mut previous_accel_used = None;
+    let mut dropped_records = 0u32;
     let mut empty_polls = 0u32;
     let mut sample_count = 0u32;
     let mut sample_dt_us = 0u64;
     let mut last_log = 0;
     let mut motor_armed = false;
-    let mut records: [Option<Record>; 32] = [None; 32];
+    let mut records: [Option<Record>; 64] = [None; 64];
     let mut record_count = 0;
     let mut next_record = 0;
     loop {
         let now = epoch.elapsed().as_micros();
         response.tick(now);
         let late = timing.begin(now, MAX_LOOP_GAP_US);
-        if motor_armed && late {
+        if response.supervising() && late {
             issue = "loop interval exceeded 30ms deadline";
             response.fail(Fault::Timing);
         }
@@ -190,15 +215,43 @@ async fn main(_spawner: Spawner) -> ! {
             );
             watchdog.disable();
             let age = latest.map(|r: Record| now.saturating_sub(r.us));
-            let detail = match response.control.state() {
-                State::Fault(Fault::Stale) => "last valid estimate exceeded 40ms freshness limit",
-                State::Fault(Fault::Tilt) => "pitch reached/exceeded 15deg cutoff",
-                State::Fault(Fault::TrialExpired) => "one-shot response window expired",
+            for event in response.transitions()[logged_transitions..]
+                .iter()
+                .flatten()
+            {
+                info!(
+                    "STATE {:?} -> {:?} at {}us: {}; disarm_reason={:?}",
+                    event.from,
+                    event.to,
+                    event.us,
+                    event.reason,
+                    if event.to == ResponseState::Disarmed {
+                        response.disarm_reason
+                    } else {
+                        None
+                    }
+                );
+            }
+            let detail = match response.disarm_reason {
+                Some(DisarmReason::ArmingTimeout) => {
+                    "readiness/neutral arming deadline expired; ACTIVE never started"
+                }
+                Some(DisarmReason::ActiveTimeout) => {
+                    "configured ACTIVE motor-response window expired"
+                }
+                Some(DisarmReason::Fault(Fault::Stale)) => {
+                    "last valid estimate exceeded 40ms freshness limit"
+                }
+                Some(DisarmReason::Fault(Fault::Tilt)) => "pitch reached/exceeded 15deg cutoff",
                 _ => issue,
             };
             warn!(
-                "DISARM: {:?}; detail={detail}; sample_age_us={age:?}; loop_us={} work_us={} max_loop_us={} max_work_us={} missed_deadlines={}; final A/LEFT=0 B/RIGHT=0; reset required; buffered telemetry follows.",
+                "DISARM: response_state={:?} reason={:?} controller={:?}; sensor_fault={:?} correction_age_us={:?} accel_rejection={last_accel_rejection:?} bus_error={last_bus_error:?} dropped_records={dropped_records}; detail={detail}; sample_age_us={age:?}; loop_us={} work_us={} max_loop_us={} max_work_us={} missed_deadlines={}; final A/LEFT=0 B/RIGHT=0; reset required; buffered telemetry follows.",
+                response.state(),
+                response.disarm_reason,
                 response.control.state(),
+                response.sensor_fault,
+                response.accel_correction_age_us,
                 timing.interval_us,
                 timing.work_us,
                 timing.max_interval_us,
@@ -218,27 +271,37 @@ async fn main(_spawner: Spawner) -> ! {
                 let now = epoch.elapsed().as_micros();
                 sample_count = sample_count.saturating_add(1);
                 let (a, g) = calibration::observation(sample);
+                let corrected_g = g - bias;
+                last_accel_rejection = frame.accel_rejection(a);
+                last_bus_error = None;
                 if let Some(before) = previous_sample.replace(now) {
                     sample_dt_us = now.saturating_sub(before);
                     let dt = sample_dt_us as f32 * 1e-6;
-                    if let Some(est) = filter.update(&frame, a, g - bias, dt) {
+                    let initialized = filter.pitch_deg().is_some();
+                    if let Some(fault) = input_fault(a.0, corrected_g.0, sample.gyro_raw) {
+                        issue = "invalid raw/corrected sensor input; no propagation allowed";
+                        response.sensor_fail(fault);
+                        filter.reset();
+                        latest = None;
+                    } else if let Some(est) = filter.update(&frame, a, corrected_g, dt) {
                         issue = "valid estimator result";
                         let output =
                             response.sample(est.pitch_deg, est.rate_dps, est.accel_used, dt, now);
-                        if response.control.state() == State::Fault(Fault::Invalid) {
-                            issue = "invalid/gyro-only estimate rejected by LIVE policy";
-                        } else if response.control.state() == State::Fault(Fault::Timing) {
+                        if response.disarm_reason == Some(DisarmReason::Fault(Fault::Invalid)) {
+                            issue = "sensor validity policy rejected estimate; see sensor_fault";
+                        } else if response.disarm_reason == Some(DisarmReason::Fault(Fault::Timing))
+                        {
                             issue = "invalid/nonmonotonic sample timing or dt >40ms";
                         }
                         // Check real elapsed time after I2C/filter work, before issuing commands.
                         response.tick(epoch.elapsed().as_micros());
                         if timing.check_work(epoch.elapsed().as_micros(), MAX_LOOP_GAP_US)
-                            && motor_armed
+                            && response.supervising()
                         {
                             issue = "acquisition/filter work exceeded 30ms deadline";
                             response.fail(Fault::Timing);
                         }
-                        if response.control.state() == State::Active && !response.finished {
+                        if response.state() == ResponseState::Active && !response.finished {
                             if !motor_armed {
                                 watchdog.enable();
                                 watchdog.feed();
@@ -273,6 +336,9 @@ async fn main(_spawner: Spawner) -> ! {
                                 rate: est.rate_dps,
                                 output,
                                 ready: response.control.ready(now),
+                                state: response.state(),
+                                limited_pd: response.limited_pd.or(output.map(|o| o.limited_pd)),
+                                neutral: response.neutral_satisfied,
                                 age_us: epoch.elapsed().as_micros().saturating_sub(now),
                                 dt_us: sample_dt_us,
                                 loop_us: timing.interval_us,
@@ -280,34 +346,50 @@ async fn main(_spawner: Spawner) -> ! {
                                 work_us: timing.work_us,
                                 missed: timing.missed_deadlines,
                                 poll_wait: false,
+                                accel_used: est.accel_used,
+                                accel_age_us: response.accel_correction_age_us,
+                                accel_rejection: last_accel_rejection,
                             });
                         } else {
                             latest = None;
                         }
                     } else {
-                        issue = "estimator rejected dt/input/gravity reference";
+                        issue = "estimator returned no orientation; see sensor_fault and accel_rejection";
                         latest = None;
-                        response.fail(Fault::Invalid);
+                        if !dt.is_finite() || dt <= 0.0 || dt > 0.1 {
+                            response.sensor_fault = Some(SensorFault::SampleTiming);
+                            response.fail(Fault::Timing);
+                        } else {
+                            response.sensor_fail(if !initialized {
+                                SensorFault::NoGravityReference
+                            } else if last_accel_rejection.is_some() {
+                                SensorFault::FilterGyroPropagationExpired
+                            } else {
+                                SensorFault::FilterInvalid
+                            });
+                        }
                     }
                 }
             }
             Ok(None) => {
                 empty_polls = empty_polls.saturating_add(1);
             }
-            Err(_) => {
+            Err(error) => {
                 issue = "BMI160 I2C read error";
+                last_bus_error = Some(error);
                 latest = None;
-                response.fail(Fault::Invalid);
+                response.sensor_fail(SensorFault::I2cRead);
                 filter.reset();
                 previous_sample = None;
             }
         }
-        if timing.check_work(epoch.elapsed().as_micros(), MAX_LOOP_GAP_US) && motor_armed {
+        if timing.check_work(epoch.elapsed().as_micros(), MAX_LOOP_GAP_US) && response.supervising()
+        {
             issue = "sensor poll/loop work exceeded 30ms deadline";
             response.fail(Fault::Timing);
         }
         response.tick(epoch.elapsed().as_micros());
-        if response.control.state() != State::Active || response.finished {
+        if response.state() != ResponseState::Active || response.finished {
             let _ = drive(
                 &mut motors,
                 &mut response,
@@ -319,15 +401,40 @@ async fn main(_spawner: Spawner) -> ! {
                 watchdog.disable();
             }
         }
+        if !motor_armed {
+            for event in response.transitions()[logged_transitions..]
+                .iter()
+                .flatten()
+            {
+                info!(
+                    "STATE {:?} -> {:?} at {}us: {}; disarm_reason={:?}",
+                    event.from,
+                    event.to,
+                    event.us,
+                    event.reason,
+                    if event.to == ResponseState::Disarmed {
+                        response.disarm_reason
+                    } else {
+                        None
+                    }
+                );
+            }
+            logged_transitions = response.transitions().len();
+        }
         // Keep a valid estimate across empty polls; never advance filter/kick time
         // or rewrite motor commands simply because data-ready was not asserted.
         if let Some(r) = record {
             latest = Some(r);
-            if motor_armed && r.us >= next_record && record_count < records.len() {
-                records[record_count] = Some(r);
-                record_count += 1;
+            if motor_armed && (r.us >= next_record || previous_accel_used != Some(r.accel_used)) {
+                if record_count < records.len() {
+                    records[record_count] = Some(r);
+                    record_count += 1;
+                } else {
+                    dropped_records = dropped_records.saturating_add(1);
+                }
                 next_record = r.us + 100_000;
             }
+            previous_accel_used = Some(r.accel_used);
         }
         timing.check_work(epoch.elapsed().as_micros(), MAX_LOOP_GAP_US);
         if !motor_armed && epoch.elapsed().as_micros().saturating_sub(last_log) >= 200_000 {
@@ -343,6 +450,10 @@ async fn main(_spawner: Spawner) -> ! {
             };
             if fresh && let Some(mut r) = latest {
                 r.ready = response.control.ready(report_now);
+                r.state = response.state();
+                r.limited_pd = response.limited_pd;
+                r.neutral = response.neutral_satisfied;
+                r.accel_age_us = response.accel_correction_age_us;
                 r.age_us = report_now.saturating_sub(r.us);
                 r.loop_us = timing.interval_us;
                 r.max_loop_us = timing.max_interval_us;
@@ -352,8 +463,13 @@ async fn main(_spawner: Spawner) -> ! {
                 log_record(r);
             } else {
                 info!(
-                    "State={:?}; estimate={status}; age_us={age:?}; ready={}; sample_dt_us={sample_dt_us}; samples={sample_count} empty_polls={empty_polls}; loop_us={} work_us={} max_loop_us={} max_work_us={} missed_deadlines={}; motors OFF",
+                    "State={:?}; controller={:?}; limited_pd={:?}; neutral={}; sensor_fault={:?} accel_rejection={last_accel_rejection:?} correction_age_us={:?} bus_error={last_bus_error:?}; estimate={status}; age_us={age:?}; ready={}; sample_dt_us={sample_dt_us}; samples={sample_count} empty_polls={empty_polls}; loop_us={} work_us={} max_loop_us={} max_work_us={} missed_deadlines={}; motors OFF",
+                    response.state(),
                     response.control.state(),
+                    response.limited_pd,
+                    response.neutral_satisfied,
+                    response.sensor_fault,
+                    response.accel_correction_age_us,
                     response.control.ready(report_now),
                     timing.interval_us,
                     timing.work_us,

@@ -383,3 +383,51 @@ fn measured_timestamp_jitter_still_calibrates_without_an_assumed_odr() {
     }
     panic!("jittered fresh timestamps should complete");
 }
+
+#[test]
+fn accel_rejection_reports_measured_gate_and_transient_preserves_finite_gyro_prediction() {
+    use orientation::AccelRejection;
+    let f = frame();
+    assert_eq!(f.accel_rejection(gravity(0.0)), None);
+    assert_eq!(
+        f.accel_rejection(v(f32::NAN, 0.0, G)),
+        Some(AccelRejection::NonFinite)
+    );
+    let Some(AccelRejection::Magnitude {
+        measured,
+        minimum,
+        maximum,
+    }) = f.accel_rejection(v(0.0, 0.0, 1.2 * G))
+    else {
+        panic!("magnitude gate")
+    };
+    near(measured, 1.2 * G);
+    near(minimum, 0.85 * G);
+    near(maximum, 1.15 * G);
+    assert!(matches!(
+        f.accel_rejection(v(0.0, 0.5 * G, libm::sqrtf(0.75) * G)),
+        Some(AccelRejection::Sideways { .. })
+    ));
+    let mut filter = ComplementaryFilter::new(0.5);
+    assert!(
+        filter
+            .update(&f, v(0.0, 0.0, 1.2 * G), Vector::ZERO, 0.01)
+            .is_none()
+    ); // Cannot start without gravity.
+    filter.update(&f, gravity(0.0), Vector::ZERO, 0.01).unwrap();
+    let transient = filter
+        .update(&f, v(0.0, 0.0, 1.2 * G), v(0.0, 10.0, 0.0), 0.01)
+        .unwrap();
+    assert!(!transient.accel_used);
+    near(transient.pitch_deg, 0.1);
+    near(transient.rate_dps, 10.0);
+    let recovered = filter.update(&f, gravity(0.0), Vector::ZERO, 0.01).unwrap();
+    assert!(recovered.accel_used);
+    assert!(recovered.pitch_deg.is_finite());
+    assert!(
+        filter
+            .update(&f, gravity(0.0), v(0.0, f32::NAN, 0.0), 0.01)
+            .is_none()
+    );
+    assert!(filter.pitch_deg().is_none());
+}
