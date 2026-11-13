@@ -15,3 +15,7 @@ path = "../orientation.rs"
 [[test]]
 name = "balance"
 path = "../balance.rs"
+
+[[test]]
+name = "pwm-mapping"
+path = "../pwm_mapping.rs"

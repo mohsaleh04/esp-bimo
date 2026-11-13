@@ -9,3 +9,5 @@ pub mod motors;
 pub mod orientation;
 
 pub mod balance;
+
+pub mod pwm_mapping;

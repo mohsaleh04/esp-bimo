@@ -9,6 +9,7 @@ use esp_bimo::{
     board::Board,
     motors::{DualMotor, DutyLimit, l298n::L298n},
     orientation::ComplementaryFilter,
+    pwm_mapping::{Config as PwmConfig, KickConfig, KickState},
 };
 use esp_hal::{
     clock::CpuClock,
@@ -21,6 +22,27 @@ use log::{info, warn};
 mod calibration;
 
 esp_bootloader_esp_idf::esp_app_desc!();
+
+// Mathematical DRY preview only; these are not validated live settings.
+// This never changes driver limits or grants permission to energize motors.
+const DRY_PWM: PwmConfig = PwmConfig {
+    enabled: true,
+    deadband: 2.0,
+    pd_output_limit: 15.0,
+    minimum_duty: 25.0,
+    maximum_duty: 50.0,
+    slew_per_second: None,
+};
+
+// Simulation only: both enabled flags must be true to preview a kick.
+const DRY_KICK: KickConfig = KickConfig {
+    enabled: true,
+    kick_duty: 50.0,
+    kick_duration_ms: 50,
+    trigger_threshold: 4.0,
+    rearm_delay_ms: 300,
+    reversal_pause_ms: 100,
+};
 
 fn disable(motors: &mut L298n, watchdog: &mut Wdt<TIMG1<'static>>, running: &mut bool) {
     // Disable outputs before watchdog changes or potentially blocking logging.
@@ -38,6 +60,11 @@ async fn main(_spawner: Spawner) -> ! {
     let board = Board::init(p);
     let settings = Settings::default(); // Edit documented gains/limit here via Settings::default.
     assert!(settings.valid());
+    assert!(DRY_PWM.valid());
+    assert_eq!(DRY_PWM.pd_output_limit, f32::from(settings.output_limit));
+    assert!(DRY_KICK.valid(DRY_PWM));
+    info!("DRY-only kick: {DRY_KICK:?}; no motor activation");
+    info!("DRY-only PWM mapping: {DRY_PWM:?}; motors remain OFF");
     let mut motors = L298n::new(
         board.motor_pwm,
         board.inactive_outputs,
@@ -90,6 +117,8 @@ async fn main(_spawner: Spawner) -> ! {
     let epoch = Instant::now();
     let mut previous = None;
     let mut latest = None;
+    let mut mapped: Option<esp_bimo::pwm_mapping::Preview> = None;
+    let mut kick_state = KickState::default();
     let mut last_log = Instant::now();
     let mut announced = State::DryRun;
     let mut invalid_reason = "waiting for two fresh samples";
@@ -99,6 +128,10 @@ async fn main(_spawner: Spawner) -> ! {
 
     loop {
         control.tick(epoch.elapsed().as_micros());
+        if control.state() != State::DryRun || !control.sample_fresh(epoch.elapsed().as_micros()) {
+            mapped = None;
+            kick_state.reset();
+        }
         if control.state() != State::Active {
             disable(&mut motors, &mut watchdog, &mut watchdog_running);
         }
@@ -114,10 +147,41 @@ async fn main(_spawner: Spawner) -> ! {
                             if !estimate.accel_used {
                                 control.block_arming();
                             }
+                            if control.state() == State::DryRun {
+                                let was_kicking = mapped.is_some_and(|v| v.kick_active);
+                                mapped = control
+                                    .output(estimate.pitch_deg, estimate.rate_dps)
+                                    .and_then(|raw| {
+                                        kick_state.update(
+                                            DRY_PWM,
+                                            DRY_KICK,
+                                            f32::from(raw),
+                                            dt,
+                                            now / 1_000,
+                                        )
+                                    });
+                                // A 50ms preview may fall between the 10Hz summaries.
+                                // Log transitions too, while the real motors remain disarmed.
+                                if let Some(preview) = mapped
+                                    && preview.kick_active != was_kicking
+                                {
+                                    info!(
+                                        "DRY kick transition: raw_pd={:.2} mapped_pwm={} kick_active={} kick_elapsed_ms={} final_(A,B)={:?}; actual motors OFF",
+                                        settings.kp * estimate.pitch_deg
+                                            + settings.kd * estimate.rate_dps,
+                                        preview.mapped_pwm,
+                                        preview.kick_active,
+                                        preview.kick_elapsed_ms,
+                                        wheel_commands(preview.final_pwm as i16)
+                                    );
+                                }
+                            }
                             latest = Some(estimate);
                         } else {
                             control.fault(Fault::Invalid);
                             latest = None;
+                            mapped = None;
+                            kick_state.reset();
                         }
                     } else {
                         invalid_reason = if dt <= 0.0 || dt > 0.1 {
@@ -129,6 +193,8 @@ async fn main(_spawner: Spawner) -> ! {
                         };
                         control.fault(Fault::Invalid);
                         latest = None;
+                        mapped = None;
+                        kick_state.reset();
                     }
                 }
                 if control.state() == State::Active {
@@ -157,10 +223,16 @@ async fn main(_spawner: Spawner) -> ! {
                 filter.reset();
                 previous = None;
                 latest = None;
+                mapped = None;
+                kick_state.reset();
                 control.fault(Fault::Invalid);
             }
         }
         control.tick(epoch.elapsed().as_micros());
+        if control.state() != State::DryRun || !control.sample_fresh(epoch.elapsed().as_micros()) {
+            mapped = None;
+            kick_state.reset();
+        }
         if control.state() != State::Active {
             disable(&mut motors, &mut watchdog, &mut watchdog_running);
             if control.state() != announced {
@@ -174,10 +246,16 @@ async fn main(_spawner: Spawner) -> ! {
                 if let Some(estimate) =
                     latest.filter(|_| control.sample_fresh(epoch.elapsed().as_micros()))
                 {
+                    let raw_pd = settings.kp * estimate.pitch_deg + settings.kd * estimate.rate_dps;
                     let u = control.output(estimate.pitch_deg, estimate.rate_dps);
-                    let wheels = u.map(wheel_commands);
+                    let mapped_pwm = mapped.map(|v| v.mapped_pwm);
+                    let kick_active = mapped.is_some_and(|v| v.kick_active);
+                    let kick_elapsed_ms = mapped.map(|v| v.kick_elapsed_ms);
+                    let final_pwm = mapped.map(|v| v.final_pwm);
+                    let mapped_u = final_pwm.map(|v| v as i16); // Driver resolution is 1%; truncate toward zero.
+                    let wheels = mapped_u.map(wheel_commands);
                     info!(
-                        "{:?}: estimate valid; pitch={:.2}deg rate={:.2}deg/s accel_used={} live_ready={} dry_u={u:?} dry_(A,B)={wheels:?}; actual motors OFF",
+                        "{:?}: estimate valid; pitch={:.2}deg rate={:.2}deg/s accel_used={} live_ready={} raw_pd={raw_pd:.2} limited_pd={u:?} mapped_pwm={mapped_pwm:?} kick_active={kick_active} kick_elapsed_ms={kick_elapsed_ms:?} final_pwm={final_pwm:?} final_u={mapped_u:?} dry_(A,B)={wheels:?}; actual motors OFF",
                         control.state(),
                         estimate.pitch_deg,
                         estimate.rate_dps,
@@ -185,6 +263,8 @@ async fn main(_spawner: Spawner) -> ! {
                         control.ready(epoch.elapsed().as_micros())
                     );
                 } else {
+                    mapped = None;
+                    kick_state.reset();
                     let reason = if latest.is_some() {
                         "no valid fresh sample within 40 ms (stale or timing fault)"
                     } else {

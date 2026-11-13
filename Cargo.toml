@@ -13,6 +13,8 @@ path = "./src/bin/main.rs"
 default = []
 motor-test = []
 motor-pwm-diagnostic = []
+motor-kick-diagnostic = []
+motor-kick-live = ["motor-kick-diagnostic"]
 orientation-diagnostic = []
 balance-test = []
 balance-live = ["balance-test"]
@@ -31,6 +33,11 @@ required-features = ["motor-test"]
 name = "motor-pwm-diagnostic"
 path = "src/bin/motor_pwm_diagnostic.rs"
 required-features = ["motor-pwm-diagnostic"]
+
+[[bin]]
+name = "motor-kick-diagnostic"
+path = "src/bin/motor_kick_diagnostic.rs"
+required-features = ["motor-kick-diagnostic"]
 
 [[bin]]
 name = "orientation-diagnostic"

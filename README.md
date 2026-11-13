@@ -405,3 +405,179 @@ cargo run --release --locked --features motor-pwm-diagnostic --bin motor-pwm-dia
 
 No serial commands are needed. Logs identify phase, signed commands, effective
 duty, stopping, and completion. No movement is claimed by the firmware.
+
+### DRY-only PWM compensation preview
+
+`balance-test` still boots with motors disarmed, calibrates, then automatically
+enters DRY. No serial input is needed. It never grants live permission, including
+when `balance-live` is selected. PWM mapping only calculates telemetry; it is not
+connected to motor commands. Calibration, faults, the estimator, and driver limits
+are unchanged. Any future live experiment must be a separately selected firmware
+configuration with its own deliberate post-calibration activation gate; none is
+enabled here. Selecting a mapping must never grant motor permission.
+
+Edit `DRY_PWM` in `src/bin/balance_test.rs`:
+
+- `enabled`: currently `true` for mathematical DRY preview only.
+- `deadband`: defaults to 2 raw PD percentage points; magnitude <= this maps to zero.
+- `minimum_duty`: 25%, the lower endpoint of the proportional range immediately
+  above the deadband. It is not a temporary starting kick.
+- `maximum_duty`: currently 50%; clips both signs. DRY-only values such as
+  a 40% floor and 45% ceiling can preview the measured suspended-wheel startup
+  threshold. They do not establish a safe live configuration.
+- `slew_per_second`: `None` by default; e.g. `Some(50.0)` limits changes to
+  50 percentage points per second, using fresh-sample measured dt. Ramps can
+  pass below the configured duty floor. Exact zero bypasses the ramp and stops;
+  reversals discard the previous sign, then ramp in the new direction.
+
+Disabled mapping is identity except for the configured maximum. Enabled mapping:
+`u=0` inside the deadband, otherwise
+`u=sign(PD) * (minimum_duty + clamp((abs(PD)-deadband)/(pd_output_limit-deadband), 0, 1) * (maximum_duty-minimum_duty))`.
+Input is the existing bounded integer PD command (`Settings::output_limit`, 15%
+by default); raw floating-point PD and that limited value are both logged.
+This proportional mapping still jumps from zero to the lower PWM endpoint just
+above the deadband; review that discontinuity before any future live test.
+There is no motion detection, start/run hysteresis, 100% kick, or high-duty pulse.
+
+At about 10 Hz, logs show pitch, pitch rate, raw PD, limited PD, mapped signed
+output, and electrical A/B commands `(-u,+u)`. Floating mapping state is retained
+for slew precision; final commands truncate toward zero to the driver's 1% units.
+Invalid/stale data clears the mapping state and logs `dry_u=None`.
+
+Tune deadband first from upright noise, then preview the floor/ceiling and optional
+slew. The measured 40% starting and 25% running values came from suspended wheels;
+load, friction and supply changes can change them. The measured 9.72 V full-duty
+motor voltage on a 12 V supply exceeds the motors' 6 V rating. PWM duty does not
+bound instantaneous voltage/current or establish thermal safety. Do not infer
+live safety from DRY results or enable full-duty operation.
+
+Build only:
+
+```sh
+cargo build --release --locked --features balance-test --bin balance-test
+```
+
+### Optional startup-kick simulation (DRY only)
+
+`DRY_KICK` in `balance_test.rs` is currently enabled for mathematical DRY preview. Both `DRY_PWM.enabled`
+and `DRY_KICK.enabled` must be true to preview it. This never enables motors,
+even with `balance-live`; PD gains, calibration and live control are unchanged.
+There are no blocking waits in the mapper. It uses measured sample dt and
+elapsed control-loop milliseconds, and returns one signed physical-forward
+command for both wheels: A/right = negative, B/left = positive.
+
+Defaults to review:
+
+| Constant | Value | Meaning |
+| --- | --- | --- |
+| `kick_duty` | 50% | Temporary DRY duty; separate from ordinary PWM ceiling |
+| `kick_duration_ms` | 50 ms | End the kick at the first update at/after this time |
+| `trigger_threshold` | 4 PD points | Must exceed the 2-point deadband |
+| `rearm_delay_ms` | 300 ms | Continuous deadband/zero dwell to rearm; also minimum time between kick starts |
+| `reversal_pause_ms` | 100 ms | Output zero until the requested sign stays stable for this pause |
+
+The first meaningful request can start one kick. Holding that request never
+restarts it. After expiration, output returns to ordinary mapped PWM, including
+its floor/ceiling and optional slew. The kick is a separate temporary override
+of those ordinary mapping limits; it is not separately capped by the ordinary PWM ceiling, and bypasses slew limiting. It is still strictly below 100% by validation.
+No 50% permanent floor is added. Exact zero/deadband cancels a kick immediately.
+
+Small fluctuations below the trigger cannot kick. Once consumed, a same-direction
+request needs the full continuous stopped-command dwell to rearm. A reversal
+cancels the current kick and commands zero, restarting its pause if the requested
+sign changes again. After the pause a meaningful request can kick only if the
+cooldown has elapsed. If cooldown rejects that transition, holding it does not
+produce a delayed kick: it uses ordinary mapping instead.
+
+`KickState::reset()` clears command history on invalid/stale orientation or when
+leaving DRY (stop/fault/disarm of the simulated controller). Physical motor outputs
+are permanently disarmed in this binary; that ongoing safety action is separate
+from simulated command state. On fresh valid data after reset, a new meaningful
+request is treated as a new startup. Update errors also reset history.
+
+Summary logs distinguish raw/limited PD, ordinary `mapped_pwm`, `kick_active`,
+`kick_elapsed_ms`, final command, and A/B polarity. Kick transitions also log,
+because a 50 ms kick can occur between 100 ms summary lines. Invalid samples
+still report `dry_u=None`; mapped state is discarded.
+
+This is an open-loop static-friction hypothesis, not measured speed or movement.
+The suspended-wheel 40% starting/25% running observations do not establish
+loaded behavior or safe motor voltage/current. Do not use this preview as a live
+configuration; future live testing still requires a separately selected firmware
+and explicit safety review of supply, timing and post-calibration activation.
+
+
+Current proportional preview uses `pd_output_limit=15`, deadband=2, PWM range
+25–50%, mapping and kick enabled, and slew disabled. Kick settings remain 50%
+for 50 ms, trigger=4 limited PD points, rearm=300 ms, reversal pause=100 ms.
+Examples: PD ±2 -> 0%, ±8.5 -> ±37.5%, ±15 -> ±50%; larger magnitudes saturate.
+Ordinary mapping and kick triggers both use LIMITED PD. Raw PD is diagnostic
+only. The binary asserts that mapping `pd_output_limit` matches the controller's
+output limit; public `Config` initializers now require that additional field.
+Function signatures, kick state transitions, motor API and physical mapping are
+unchanged. Validation rejects nonfinite/reversed/equal PWM endpoints and
+`pd_output_limit <= deadband`. These settings never activate motors in DRY,
+including with `balance-live`, and are not validated live motor settings.
+
+### Explicitly selected motor kick/hold hardware diagnostic
+
+`motor-kick-diagnostic` is separate from balancing and PWM mapping. It reads no
+serial input. It starts disarmed, waits 15 seconds, then (only with valid settings)
+tests A/right alone followed by B/left alone. One trial per motor is configured:
+50% kick for 50 ms, immediately followed by 30% hold for 1000 ms, then stop/disarm.
+There is a 2000 ms disabled pause after each trial and an additional 3000 ms
+between motors. It ends unconditionally disarmed and idles until reset. Reset
+restarts the sequence. Electrical forward remains A negative, B positive.
+
+These are candidates, not verified safe/working values. `TEST.ceiling` defaults
+to **30%**, so the 50% candidate kick is **blocked**, with an explanatory log.
+The program rejects invalid settings rather than silently clamping or bypassing
+its ceiling. Edit the constants in `src/bin/motor_kick_diagnostic.rs` only after
+verifying the motor supply, valid L298N logic supply/common ground, and a safe
+suspended-wheel setup. Either lower candidate duties or explicitly configure a
+verified ceiling. Both kick and holding duty must fit it; 100% is rejected.
+
+Compile-time opt-in is independent of `balance-live`:
+
+- `motor-kick-diagnostic`: output-only preview, never arms motors. With default
+  invalid candidate/ceiling combination, it logs BLOCKED and stays disabled.
+- `motor-kick-live`: includes the diagnostic feature and explicitly permits real
+  output, but still refuses settings that violate the ceiling. `balance-live`
+  alone cannot permit movement in this diagnostic.
+
+Build without flashing:
+
+```sh
+cargo build --release --locked --features motor-kick-diagnostic --bin motor-kick-diagnostic
+cargo build --release --locked --features motor-kick-live --bin motor-kick-diagnostic
+```
+
+To manually run output-only preview:
+
+```sh
+cargo run --release --locked --features motor-kick-diagnostic --bin motor-kick-diagnostic
+```
+
+**Only after supply/ceiling verification, source configuration, and securing both
+wheels**, the explicit real-movement command is:
+
+```sh
+cargo run --release --locked --features motor-kick-live --bin motor-kick-diagnostic
+```
+
+Motor ratings are 6 V; the previous 12 V supply/full-duty terminal measurement
+of about 9.72 V does not establish that any proposed PWM setting is safe. Keep a
+physical motor-power cutoff accessible. No wheel movement is automatically
+measured. Deadlines are nonblocking Embassy timers, not hardware pulse cutoffs:
+blocking logs, driver updates, executor stalls or CPU hangs can delay shutdown.
+The reused L298N driver briefly detaches enables during kick-to-hold updates;
+there is no intentional stop/pause between those phases. Software cannot
+establish reset-time GPIO safety; external enable gating/pull-downs are needed
+for that guarantee. A panic may bypass normal cleanup.
+
+Host checks for the sequence, bounds, polarity and stop paths:
+
+```sh
+rustc +stable --test tests/motor_kick.rs -o /tmp/bimo-kick-tests
+/tmp/bimo-kick-tests
+```
