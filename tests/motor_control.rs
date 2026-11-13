@@ -55,3 +55,13 @@ fn input_truth_table_never_requests_both_direction_pins_high() {
     assert_eq!(Direction::Positive.inputs(), (true, false));
     assert_eq!(Direction::Negative.inputs(), (false, true));
 }
+
+#[test]
+fn diagnostic_limit_and_effective_pwm_duty_agree() {
+    // Earlier test asked for 75 but its 40% ceiling allowed only 40%.
+    assert_eq!(DutyLimit::new(40).unwrap().map(75).duty_percent, 40);
+    let limit = DutyLimit::new(50).unwrap();
+    assert_eq!(limit.map(50).duty_percent, 50);
+    assert_eq!(limit.map(0).direction, Direction::Stopped);
+    assert_eq!(limit.map(0).duty_percent, 0);
+}

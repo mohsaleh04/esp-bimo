@@ -77,6 +77,7 @@ impl DualMotor for L298n {
         // Every update first detaches both enables, including rejected commands.
         self.stop();
         self.gate.check(a, b)?;
+        let requested = (a, b);
         let a = self.limit.map(a);
         let b = self.limit.map(b);
         if a.duty_percent == 0 && b.duty_percent == 0 {
@@ -89,6 +90,18 @@ impl DualMotor for L298n {
         Self::direction(&mut self.pins.in3, &mut self.pins.in4, b.direction);
         self.a.set_timestamp(a.duty_percent as u16 * 10);
         self.b.set_timestamp(b.duty_percent as u16 * 10);
+        // Report effective duty while enables are still detached. A requested
+        // percentage above the configured ceiling must not masquerade as output.
+        log::info!(
+            "[MOTORS] requested A={} B={}; effective A={}% B={}%; MCPWM0 timer0 period={}, compare A={} B={}, active-high, 10 kHz",
+            requested.0,
+            requested.1,
+            a.duty_percent,
+            b.duty_percent,
+            self.a.period(),
+            self.a.timestamp(),
+            self.b.timestamp(),
+        );
         // Two full PWM periods while physically detached from both enables.
         Delay::new().delay_micros(200);
         if a.duty_percent != 0 {
