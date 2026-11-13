@@ -19,3 +19,7 @@ path = "../balance.rs"
 [[test]]
 name = "pwm-mapping"
 path = "../pwm_mapping.rs"
+
+[[test]]
+name = "motor-response"
+path = "../motor_response.rs"

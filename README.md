@@ -581,3 +581,168 @@ Host checks for the sequence, bounds, polarity and stop paths:
 rustc +stable --test tests/motor_kick.rs -o /tmp/bimo-kick-tests
 /tmp/bimo-kick-tests
 ```
+
+### Suspended-wheel orientation-to-motor response (NOT floor balancing)
+
+New binary/feature: `balance-motor-response-test`.
+Motor permission feature: **`balance-motor-response-live`**, independent of
+`balance-live`. The test feature reuses `balance-test` board-resource selection,
+but does not change or run that DRY binary. Calibration helper code is included
+by path; estimator, PD, proportional mapper, kick state machine, readiness
+policy, motor polarity function and L298N driver are reused without changes.
+
+Current physical labels for this diagnostic: **A = LEFT, B = RIGHT**. Historical
+labels elsewhere predate this correction. Forward electrical commands remain
+`(-u,+u)` and must be observed again with wheels suspended.
+
+Constants at the top of `src/bin/balance_motor_response_test.rs`:
+
+| Setting | Value |
+| --- | --- |
+| `SUPPLY_AND_CEILING_VERIFIED` | **false**, blocks real movement even with live feature |
+| `MOTOR_DUTY_CEILING` | 70%; both ordinary mapping and kick validated against this |
+| `WINDOW_US` | 2,000,000 us maximum from readiness arming, including neutral wait |
+| `PREPARATION_SECS` | 15 seconds after BOTH calibration poses complete |
+| `MAX_LOOP_GAP_US` | 30,000 us; active loop gap/work over this faults |
+| Ordinary PD limit | ±15, asserted to match mapping input limit |
+| Proportional mapping | deadband=2, minimum=30%, maximum=50%, slew disabled |
+| Kick candidate | 70% for 150 ms, trigger=4 LIMITED PD points |
+| Kick rearm/reversal | 300 ms zero dwell/cooldown; 100 ms reversal pause |
+| Readiness | fresh, gravity-valid estimate; within ±5° and ±5°/s continuously for 500 ms |
+| Tilt cutoff | magnitude **>=15°**, inherited from existing controller |
+| Sample freshness | >40 ms without valid fresh data disarms |
+| Hardware watchdog | 100 ms system-reset fallback, fed after fresh validated output only |
+
+Configuration rejects a kick or ordinary maximum above the duty ceiling, rather
+than silently bypassing or hiding a clamp. The 70% ceiling is a candidate,
+**not a certified safe value**. The reported 9 V/1 A adapter result (70%/150 ms,
+then 30%/1 s) was with suspended wheels only. It does not validate loaded use,
+50% sustained commands, motor terminal voltage, stall current, or temperature.
+Motors are rated 6 V; PWM percent is not a voltage/current guarantee. Verify the
+actual supply, common ground and L298N logic supply before any live build.
+
+Exact activation sequence:
+
+1. HAL/board initialization drives enables/direction LOW; driver is disarmed.
+2. Two-pose BMI160 calibration completes with motors disabled. Failure idles
+   permanently until reset. Keep the chassis supported throughout both poses.
+3. The 15-second preparation interval completes, still disabled.
+4. Without BOTH the diagnostic-specific live feature and source safety flag,
+   remain DRY permanently. Neither `balance-live` nor a predicted kick can arm.
+5. With both gates explicitly enabled, fresh valid estimates establish the
+   existing 500 ms upright/low-rate readiness dwell. This automatically arms
+   **one** supported-wheel trial; no serial input is required. Output on the
+   arming frame is zero; the two-second timer starts here.
+6. A fresh **post-arm** neutral/deadband command is required. Until then outputs
+   remain zero. A subsequent meaningful LIMITED PD request can trigger the
+   existing kick; no forced pulse happens at arming. Small commands outside the
+   deadband but below the trigger use ordinary proportional PWM without a kick.
+7. Zero cancels the kick; reversals follow the existing zero-pause/cooldown rules.
+   Cutoff, invalid data (including gyro-only estimates in LIVE), read errors,
+   timing/stale faults, motor errors or window expiration cancel mapping/kick,
+   disarm and permanently end the trial. Raising the robot upright cannot rearm.
+   Reset is required for another run, including calibration and preparation.
+
+Build only (no flash):
+
+```sh
+cargo build --release --locked --features balance-motor-response-test --bin balance-motor-response-test
+cargo build --release --locked --features balance-motor-response-live --bin balance-motor-response-test
+```
+
+Manual DRY flash/run (wheels supported; motors remain disabled):
+
+```sh
+cargo run --release --locked --features balance-motor-response-test --bin balance-motor-response-test
+```
+
+For the first physical response trial: first review DRY signs and configuration.
+Secure the chassis with BOTH wheels entirely off the ground, clear of fingers,
+clothing and wires. Keep a physical motor-power cutoff immediately accessible.
+Review the current supply and ceiling, then explicitly edit
+`SUPPLY_AND_CEILING_VERIFIED=true` only in this diagnostic. The deliberate live
+flash/run command is:
+
+```sh
+cargo run --release --locked --features balance-motor-response-live --bin balance-motor-response-test
+```
+
+Follow calibration prompts, secure support during the preparation interval, then
+hold upright/low-rate. Expect readiness to start the short window automatically.
+Hold neutral first, then lean gently within about ±10° and visually verify that
+positive pitch/request produces the physical forward wheel directions via
+A/LEFT negative and B/RIGHT positive. Cut motor power if signs are wrong. Do not
+attempt ground-contact or free-standing balancing with this firmware.
+
+Waiting/DRY telemetry is immediate. ACTIVE has **no blocking log calls**: a fixed
+buffer captures calculated pitch/rate/limited-PD/mapping/kick/A-B snapshots at
+about 10 Hz, printed only after disarm, with the final fault/timeout reason.
+Short transitions can fall between snapshots; telemetry represents calculated
+commands, not measured motor movement. Watch the wheels directly during the run.
+
+The loop polls with a 1 ms asynchronous yield and uses measured sensor dt; it
+introduces no kick/reversal sleep. This is not a guaranteed 100 Hz real-time loop:
+existing I2C is blocking (20 ms transaction timeout), and the reused motor driver
+briefly detaches enables and blocks about 1.2 ms per nonzero command. The new
+30 ms deadline detects excessive delay when execution resumes; no logging occurs
+while outputs are active. The watchdog resets after about 100 ms if progress
+stops, but reset is NOT a guaranteed hardware motor cutoff. Reset/preboot GPIO
+states, brownouts and panics still require external enable pull-downs/gating for
+reliable de-energization. Reboots repeat calibration, not automatic live output.
+
+### Response diagnostic freshness/timing logging correction
+
+`BMI160::read` polls data-ready and returns `Ok(None)` until BOTH fresh gyro and
+accel are available. The loop yields 1 ms, so most polls between roughly 100 Hz
+samples normally have no new sample. Such a poll does not invalidate the cached
+estimate, reset readiness/filter/kick, disarm, or reissue a motor command.
+
+The old logger tested a per-iteration `record` variable. At a reporting deadline
+an empty poll incorrectly printed `ready=false; no fresh valid estimate`, even
+if the previous estimate was only a few milliseconds old. Its fallback also
+checked a timestamp set before blocking log writes, so a slow write could itself
+cause that misleading fallback. These were logging errors, not evidence that
+all those sensor reads were stale. Actual gaps or readiness failures cannot be
+excluded from the historical line count alone.
+
+The corrected DRY summary uses the cached, accepted valid estimate. `FRESH`
+means age <=40 ms; `poll_wait=true` simply means the current poll did not produce
+a sample. `STALE (>40ms)` is separate from an initial wait, I2C error, or rejected
+estimate. `ready` is the real readiness-policy result at report time, not a
+fabricated value on an empty poll. Gyro-only estimates cannot establish readiness.
+
+Timing fields are microseconds: `age` is time since the accepted estimate was
+read, `dt` is measured fresh-sample interval, `loop` is start-to-start loop time,
+`max_loop` is its high-water mark, and `work` is time spent in the current loop.
+`missed` counts loops exceeding the unchanged 30 ms deadline, once per loop even
+if multiple checks detect lateness. Misses are counted in DRY too, but fault LIVE.
+A prolonged operation can count as a late work loop and a late following interval.
+Invalid/waiting summaries also show acquisition and empty-poll counts; disarm logs
+include explicit fault/detail and maximum loop/work times. This does not claim a
+guaranteed 100 Hz acquisition rate; use measured `dt` to assess actual cadence.
+
+The final motor-output gate now checks current elapsed time/freshness itself.
+Actual commands are issued only for a new accepted estimate, with a fresh
+orientation and ACTIVE state, while valid previous output can persist between
+normal empty polls. The no-new-sample path checks work deadlines too. Exceeding
+40 ms, missed active deadlines, sensor read failure, invalid/gyro-only LIVE
+estimates, timeout, and >=15° tilt retain immediate software disarm/lockout.
+“Immediate” means when execution detects the event; a CPU stall still requires
+hardware protection. No freshness/deadline thresholds were relaxed.
+
+DRY intentionally computes mathematical PD/PWM beyond 15° and now explicitly
+logs `live_tilt_ok=false`, calculated commands and `motors OFF`. That is not a
+live command or permission to bypass cutoff. ACTIVE cannot command at >=15°
+in either direction. Blocking logs remain absent from ACTIVE; buffered entries
+print after outputs are disabled. DRY logs are reduced to one line per interval,
+with the reporting timer updated after writes, reducing polling interference.
+Slow output backends can still delay DRY acquisition; maximum loop time and
+misses expose this. Existing blocking I2C/driver operations and watchdog/reset
+limitations still apply.
+
+Before considering LIVE, rerun DRY with the robot supported, inspect measured
+sample/loop timing and any explicit errors, and confirm stable readiness while
+upright plus correct calculated signs during gentle tilt. Resolve real timing
+misses first. `SUPPLY_AND_CEILING_VERIFIED` remains **false**, and all source/
+feature/post-calibration/neutral/one-shot interlocks remain in force. This change
+does not recommend enabling LIVE based solely on software tests.
