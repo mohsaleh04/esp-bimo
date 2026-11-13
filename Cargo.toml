@@ -13,6 +13,8 @@ path = "./src/bin/main.rs"
 default = []
 motor-test = []
 orientation-diagnostic = []
+balance-test = []
+balance-live = ["balance-test"]
 
 [[bin]]
 name = "motor-test"
@@ -28,6 +30,11 @@ required-features = ["motor-test"]
 name = "orientation-diagnostic"
 path = "src/bin/orientation_diagnostic.rs"
 required-features = ["orientation-diagnostic"]
+
+[[bin]]
+name = "balance-test"
+path = "src/bin/balance_test.rs"
+required-features = ["balance-test"]
 
 [dependencies]
 libm = "=0.2.16"

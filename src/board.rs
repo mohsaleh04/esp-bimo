@@ -15,6 +15,10 @@ pub struct Board {
     pub rtos_interrupt: FROM_CPU_INTR0<'static>,
     pub ledc: LEDC<'static>,
     pub motor_pwm: MCPWM0<'static>,
+    #[cfg(feature = "balance-test")]
+    pub balance_console: esp_hal::peripherals::USB_DEVICE<'static>,
+    #[cfg(feature = "balance-test")]
+    pub balance_watchdog: esp_hal::peripherals::TIMG1<'static>,
     pub buzzer: Output<'static>,
     pub i2c: I2c<'static, Blocking>,
     pub inactive_outputs: InactiveOutputs,
@@ -61,6 +65,10 @@ impl Board {
             rtos_interrupt: p.FROM_CPU_INTR0,
             ledc: p.LEDC,
             motor_pwm: p.MCPWM0,
+            #[cfg(feature = "balance-test")]
+            balance_console: p.USB_DEVICE,
+            #[cfg(feature = "balance-test")]
+            balance_watchdog: p.TIMG1,
             buzzer,
             i2c,
             inactive_outputs: outputs,

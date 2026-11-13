@@ -6,17 +6,17 @@ use control::{Direction, DutyLimit};
 
 #[test]
 fn zero_and_zero_limit_are_deenergized() {
-    let limit = DutyLimit::new(30).unwrap();
+    let limit = DutyLimit::new(30);
     assert_eq!(limit.map(0).direction, Direction::Stopped);
     assert_eq!(limit.map(0).duty_percent, 0);
-    let stopped = DutyLimit::new(0).unwrap().map(100);
+    let stopped = DutyLimit::new(0).map(100);
     assert_eq!(stopped.direction, Direction::Stopped);
     assert_eq!(stopped.duty_percent, 0);
 }
 
 #[test]
 fn signs_choose_electrical_polarity_and_magnitude_is_clamped() {
-    let limit = DutyLimit::new(30).unwrap();
+    let limit = DutyLimit::new(30);
     assert_eq!(limit.map(15).direction, Direction::Positive);
     assert_eq!(limit.map(-15).direction, Direction::Negative);
     assert_eq!(limit.map(15).duty_percent, 15);
@@ -27,10 +27,10 @@ fn signs_choose_electrical_polarity_and_magnitude_is_clamped() {
 }
 
 #[test]
-fn limits_validate_and_channels_map_independently() {
-    assert!(DutyLimit::new(101).is_none());
-    assert!(DutyLimit::new(255).is_none());
-    let limit = DutyLimit::new(100).unwrap();
+fn limits_clamp_and_channels_map_independently() {
+    assert_eq!(DutyLimit::new(101).map(200).duty_percent, 100);
+    assert_eq!(DutyLimit::new(255).map(200).duty_percent, 100);
+    let limit = DutyLimit::new(100);
     let a = limit.map(100);
     let b = limit.map(-7);
     assert_eq!((a.direction, a.duty_percent), (Direction::Positive, 100));
@@ -59,8 +59,8 @@ fn input_truth_table_never_requests_both_direction_pins_high() {
 #[test]
 fn diagnostic_limit_and_effective_pwm_duty_agree() {
     // Earlier test asked for 75 but its 40% ceiling allowed only 40%.
-    assert_eq!(DutyLimit::new(40).unwrap().map(75).duty_percent, 40);
-    let limit = DutyLimit::new(50).unwrap();
+    assert_eq!(DutyLimit::new(40).map(75).duty_percent, 40);
+    let limit = DutyLimit::new(50);
     assert_eq!(limit.map(50).duty_percent, 50);
     assert_eq!(limit.map(0).direction, Direction::Stopped);
     assert_eq!(limit.map(0).duty_percent, 0);

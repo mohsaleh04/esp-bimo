@@ -24,6 +24,7 @@ pub struct L298n {
     timer: Timer<0, MCPWM0<'static>>,
     limit: DutyLimit,
     gate: CommandGate,
+    command_logging: bool,
 }
 
 impl L298n {
@@ -57,7 +58,14 @@ impl L298n {
             timer: pwm.timer0,
             limit,
             gate: CommandGate::default(),
+            command_logging: true,
         }
+    }
+
+    /// Disable only command telemetry for a time-critical caller. Safety and PWM
+    /// behavior stay identical; existing diagnostics default to logging enabled.
+    pub fn set_command_logging(&mut self, enabled: bool) {
+        self.command_logging = enabled;
     }
 
     fn direction(first: &mut Output<'_>, second: &mut Output<'_>, direction: Direction) {
@@ -92,16 +100,18 @@ impl DualMotor for L298n {
         self.b.set_timestamp(b.duty_percent as u16 * 10);
         // Report effective duty while enables are still detached. A requested
         // percentage above the configured ceiling must not masquerade as output.
-        log::info!(
-            "[MOTORS] requested A={} B={}; effective A={}% B={}%; MCPWM0 timer0 period={}, compare A={} B={}, active-high, 10 kHz",
-            requested.0,
-            requested.1,
-            a.duty_percent,
-            b.duty_percent,
-            self.a.period(),
-            self.a.timestamp(),
-            self.b.timestamp(),
-        );
+        if self.command_logging {
+            log::info!(
+                "[MOTORS] requested A={} B={}; effective A={}% B={}%; MCPWM0 timer0 period={}, compare A={} B={}, active-high, 10 kHz",
+                requested.0,
+                requested.1,
+                a.duty_percent,
+                b.duty_percent,
+                self.a.period(),
+                self.a.timestamp(),
+                self.b.timestamp(),
+            );
+        }
         // Two full PWM periods while physically detached from both enables.
         Delay::new().delay_micros(200);
         if a.duty_percent != 0 {

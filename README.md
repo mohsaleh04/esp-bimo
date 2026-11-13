@@ -161,3 +161,188 @@ Buzzer input polarity is configured as active-low for testing: GPIO21 starts
 HIGH, and GPIO-matrix inversion makes zero PWM duty physically HIGH during
 rests. The 50% note waveform and melody are unchanged. Actual module polarity
 and whether it supports pitched tones still need hardware confirmation.
+
+## First experimental PD controller — balance-test
+
+`balance-test` is a separate experiment. The normal application and the working
+orientation/motor diagnostic binaries are unchanged. No firmware was flashed
+and no motor was activated by the agent. This is **not tuned for unattended
+balancing**. The robot's 950 g mass alone is insufficient to choose stable gains;
+motor torque, wheel geometry, center of mass and delay also matter.
+
+The control policy is in `src/balance.rs`, hardware orchestration in
+`src/bin/balance_test.rs`, and startup calibration orchestration in
+`src/bin/balance_test/calibration.rs`. The latter calls the existing BMI160,
+stationary calibration, learned pitch-frame and complementary-filter functions;
+it does not implement a second orientation algorithm.
+
+The body reference is the upright pose used during calibration. With forward
+pitch and pitch rate positive, and a zero-degree target:
+
+```text
+u = clamp(Kp * pitch_deg + Kd * pitch_rate_dps, -limit, +limit)
+RIGHT/A electrical command = -u
+LEFT/B electrical command  = +u
+Ki = 0; no integral state
+```
+
+A positive forward lean should command the wheels physically FORWARD to move
+under the body. This sign must be verified on the real robot; it is not a
+claim of closed-loop stability. PD uses measured gyro rate, not an angle
+finite-difference with an assumed fixed time step. The filter receives actual
+elapsed time between fresh successful reads.
+
+Initial editable parameters (intentionally weak, unvalidated):
+
+| Parameter | Initial value | Meaning |
+| --- | --- | --- |
+| `Settings::default().kp` | 1.0 | duty-percent per degree |
+| `Settings::default().kd` | 0.08 | duty-percent per degree/second |
+| `Settings::default().output_limit` | 15% | symmetric ceiling; settings reject limits above 30% |
+| `ARM_ANGLE_DEG` | ±5° | must be approximately upright to request ARM; DRY allows any tilt |
+| `ARM_RATE_DPS` | ±5°/s | low angular rate required for arming |
+| `UPRIGHT_DWELL_US` | 500 ms | continuously eligible fresh samples before a request |
+| `FALL_ANGLE_DEG` | 15° | reaching either tilt limit in Active faults/disarms |
+| `MAX_SAMPLE_GAP_US` | 40 ms | stale/timing cutoff checked before and after reads/commands |
+| `MAX_ACTIVE_US` | 2 seconds | maximum initial live trial, then fault/disarm |
+| TIMG1 watchdog | 100 ms | hardware reset fallback if successful live updates cease |
+
+Output is truncated toward zero to the existing driver's 1% resolution.
+There is **no minimum-duty jump, full-duty startup kick, automatic compensation,
+self-righting or gain adaptation**. If low duty only buzzes or cannot overcome
+friction, stop and diagnose; the controller will not increase its limit itself.
+The existing L298N driver also inserts approximately 1.2 ms of disabled time on
+every command, including same-direction updates. This reduces effective drive;
+no compensation is applied. A future driver can retain the physical command
+mapping while implementing the `DualMotor` interface differently.
+
+States and console commands:
+
+| State | Behavior |
+| --- | --- |
+| Calibration | Both motors disabled; two supported stationary poses as in orientation diagnostic |
+| Observe (default) | Logs angle/rate/readiness; no motor commands |
+| DryRun | `DRY` plus LF: calculates/logs u and A/B commands, motors remain disabled |
+| Active | `ARM` plus LF, only in a `balance-live` build and after all arming checks |
+| Fault | Motors disabled; STOP or RESET explicitly clears the latch, then fresh upright dwell and ARM are required |
+
+Send `STOP` plus LF, `!`, or a space to stop. `!`/space do not need Enter.
+Invalid/overlong command lines are logged as rejected and stop control, but do not clear a fault latch. CRLF works; CR alone does
+not submit a command. Commands queued before calibration completes are
+discarded. An additional mode request during Active stops that trial and
+requires a new dwell; repeatedly sending ARM cannot extend it.
+
+Calibration failure leaves the program disabled until reset. Invalid/nonfinite
+estimates, rejected acceleration correction, sensor-read errors, stale data,
+timing faults, reaching ±15°, and trial expiry disarm. Faults never automatically
+resume control when the robot is raised upright. In Active, the application and
+motor-command telemetry are silent so USB/logging cannot block an energized
+control update. State/fault messages print only after outputs are disabled.
+There are no live-tuning console commands.
+
+### Exact test procedure
+
+1. Keep motor power disconnected. Retain an accessible independent power cutoff.
+   Check common ground, valid L298N logic power and enable pull-downs using
+   accessible points as described in `docs/motors.md`. No chassis dismantling
+   or wiring modification is performed by this firmware.
+2. Build the observation/dry-run version (build commands do not flash):
+
+   ```sh
+   cargo build --release --locked --features balance-test --bin balance-test
+   ```
+
+   Only when you explicitly choose to flash:
+
+   ```sh
+   cargo run --release --locked --features balance-test --bin balance-test
+   ```
+
+3. Support upright for the first stationary calibration, then follow the prompt
+   for the forward 15–30° stationary pose. Return upright. All motor outputs stay
+   LOW. Calibration/frame are relearned on every reset. The buzzer is silent.
+4. Use the native USB Serial/JTAG console (GPIO19/20) with LF line endings.
+   Send `DRY` after calibration, even while still in the forward pose.
+   Slowly lean forward/backward; no upright dwell is needed for DRY. Verify:
+   forward-positive angle/rate -> positive u -> A negative, B positive;
+   backward-negative angle/rate -> negative u -> A positive, B negative.
+   A held lean should have rate near zero. Dry-run lines explicitly say actual
+   motors OFF. `ARM` is rejected in this build even after successful calibration.
+5. Before any live test, suspend/restrain both wheels clear of the ground, with
+   no fingers, clothes or wires near them. Confirm the sensor sign and the
+   previously observed physical mapping. Do not proceed directly to floor
+   balancing based only on software logs.
+6. If explicitly ready for a brief live trial, build/flash the live-capable
+   version with motor power disconnected:
+
+   ```sh
+   cargo build --release --locked --features balance-live --bin balance-test
+   # Only when the owner deliberately chooses to flash:
+   cargo run --release --locked --features balance-live --bin balance-test
+   ```
+
+   This still boots into Observe, never into Active. Recalibrate and repeat DRY.
+   STOP, hold upright, and wait for readiness again. Connect motor power only
+   when the suspended setup, independent cutoff and supply checks are ready.
+   Hold near upright at low rate and send exactly `ARM` plus LF. The first live
+   trial is limited to two seconds, 15% duty and the tilt/timing conditions.
+7. **Verify feedback sign with wheels suspended:** a small forward lean must
+   produce physical forward wheel motion, and a small backward lean the reverse.
+   Use the existing safe short manual channel tests first if needed to reconfirm
+   wiring/polarity. If the wheels accelerate the wrong way, stop/cut power and
+   correct the sign before any further live trial. If the cap is too weak for
+   visible motion, the physical sign check is inconclusive: do not enable an
+   automatic minimum-duty jump or proceed to unsupported floor balancing.
+8. `!`/space stops at the next USB poll; a complete STOP line also works.
+   After faults, keep the robot supported, inspect the cause, and use a new
+   STOP or RESET, then a fresh upright dwell and a deliberate ARM request. Do not leave it alone.
+   USB disconnection or exiting the monitor is **not** an immediate stop command.
+   The normal two-second trial cap still applies while the CPU runs.
+
+### Watchdog and electrical limits
+
+The binary reserves TIMG1's hardware MWDT, independently of the RTOS TIMG0 timer.
+Installed esp-hal 1.2.2 `Wdt::enable()` configures Stage0 `ResetSystem` and disables
+later stages. It is enabled before arming, fed only after a fresh valid sample
+and a successful command, and disabled only after motor disarm. A main-loop hang
+or panic should therefore trigger a reset rather than rely solely on Rust Drop.
+The watchdog path is source-inspected and compiled, **not hardware-validated**.
+See [Espressif watchdog documentation](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/system/wdts.html).
+
+This is a reset fallback, **not a guaranteed motor-power cutoff**. Drop does not
+run on panic-abort, and GPIO behavior through watchdog reset/bootloader/debugging
+cannot be guaranteed by this software. External enable pull-downs or independent
+hardware gating/cutoff must be verified before powered trials. A debugger can
+also affect watchdog behavior. Do not infer an unconditional 100 ms physical
+shutdown guarantee from the configured timeout.
+
+The software 40 ms deadline is checked around operations; blocking I²C reads
+can delay when a fault is noticed. Existing I²C transactions have a 20 ms timeout
+and a BMI160 read can contain more than one transaction. The watchdog is the
+separate reset fallback; it cannot cure invalid L298N logic power or wiring.
+
+**A 9 V adapter with 6 V-rated motors remains an electrical risk.** Low average
+PWM duty does not turn the supply into a guaranteed 6 V source, limit stall
+current, or guarantee safe heating. L298N voltage drop varies with load. Motor
+current, motor-terminal voltage, adapter behavior and thermal performance remain
+unverified. The duty ceiling is not electrical protection. Keep initial tests
+brief and suspended, and resolve supply/current safety before floor balancing.
+
+Validation commands (software only):
+
+```sh
+CARGO_ENCODED_RUSTFLAGS='' cargo +stable test --locked --manifest-path tests/orientation/Cargo.toml --target x86_64-unknown-linux-gnu
+cargo build --release --locked --features balance-test --bin balance-test
+cargo build --release --locked --features balance-live --bin balance-test
+cargo clippy --locked --all-features --bins --lib -- -D warnings
+```
+
+OBSERVE does not latch tilt faults after calibration: the forward calibration pose
+may remain tilted. Send `DRY` plus LF from OBSERVE at any tilt; it never energizes
+the motors. DRY reports PD output for fresh valid estimates (including the filter's
+bounded gyro-only estimates, marked `accel_used=false`). Invalid/stale estimates
+report `dry_u=None`; DRY resumes calculations when valid samples return.
+`live_ready` applies only to ARM. Gyro-only samples cannot establish live readiness.
+Live ACTIVE retains all tilt, freshness, timing, and estimate validity protections.
+Returning upright or sending DRY/ARM does not clear a live fault: send `STOP` or
+`RESET` explicitly, then complete a new upright dwell before ARM.
