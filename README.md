@@ -879,3 +879,43 @@ response phase, so the production controller's unchanged `MAX_ACTIVE_US=2s`
 cannot prematurely terminate this separate experiment. The response phase,
 not that internal tracking state, gates every physical motor command. Local
 configuration validation rejects response windows longer than 5 seconds.
+
+### Tethered ground-contact preparation and event recorder
+
+See [the full proposed procedure and sensor/kick review](docs/ground_contact_test.md).
+`balance-ground-contact-test` is a separate 1-second supported-body profile,
+**disabled by default**. Its `balance-ground-contact-live` opt-in additionally
+requires four false-by-default source assertions for restraint, independent
+power cutoff, supply limits and sensor-fault review. The earlier CorrectionExpired
+cause is still unresolved; the latest supplied log instead shows a neutral-wait
+Tilt cutoff before ACTIVE. Do not activate ground contact on that evidence.
+
+Acquisition/safety code now lives in `src/bin/motor_response_runtime/mod.rs` and
+is shared by thin, explicitly selected firmware wrappers. Current suspended
+configuration is preserved at 30s ACTIVE/15s preparation; the ground profile uses
+1s ACTIVE/30s preparation and aborts any second kick or meaningful reversal. Both
+retain the same 10s arming, 50ms correction, 40ms freshness, 30ms loop and 15° limits.
+The mapper, gains, kick settings, electrical polarity and calibration are unchanged.
+
+A separate recent-event ring and pinned fault/sensor/kick/last-command slots
+survive main telemetry overflow. Overwrites and calculated kick/command-transition
+counts are reported after disarm; all data remain RAM-only. Main telemetry drops
+are not evidence by themselves of repeated kicks or CPU deadline misses.
+
+Ground safety audit: see the final section of
+[the ground-contact procedure](docs/ground_contact_test.md). Ground vetoes/output
+errors now latch and physically disarm at one tested final gate, with immediate
+driver shutdown at deadline checkpoints. The 30ms limit is unchanged. Ground-only
+compact logs and per-operation wall timing distinguish polling/driver work from
+summary logging and the remaining scheduling gap. The reported 30.222ms DRY gap
+occurred while maximum measured body work was only 3.018ms; blocking summary
+logging is likely, not proven. All four ground LIVE source gates remain false.
+
+### Restrained bidirectional response diagnostic
+
+See [procedure and interlocks](docs/bidirectional_ground_contact_test.md).
+`balance-bidirectional-ground-test` adds a separate final driver-command reversal
+interlock (100ms after an accepted zero command) and permits only the first Kick.
+All four new source gates and the existing ground source gates are false.
+Both ground profiles prepare for 30s; suspended-wheel preparation remains 15s.
+The ACTIVE window remains 1s. This does not enable autonomous balancing.

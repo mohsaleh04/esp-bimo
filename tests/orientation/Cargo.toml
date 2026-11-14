@@ -23,3 +23,7 @@ path = "../pwm_mapping.rs"
 [[test]]
 name = "motor-response"
 path = "../motor_response.rs"
+
+[[test]]
+name = "response-events"
+path = "../response_events.rs"

@@ -213,6 +213,18 @@ impl Response {
             self.finish(DisarmReason::Fault(reason));
         }
     }
+    /// Explicit diagnostic abort, including before readiness. Existing suspended
+    /// policy keeps fail()'s recoverable pre-ready behavior; ground calls this
+    /// only for its stricter terminal estimate/tilt guard.
+    pub fn abort(&mut self, reason: Fault) {
+        if self.finished {
+            return;
+        }
+        self.fail(reason);
+        if !self.finished {
+            self.finish(DisarmReason::Fault(reason));
+        }
+    }
     pub fn tick(&mut self, now: u64) {
         if self.finished {
             return;

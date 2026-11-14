@@ -318,3 +318,26 @@ fn kick_trigger_uses_limited_pd_and_expiration_returns_proportional_output() {
         close(p.final_pwm, sign * 37.5);
     }
 }
+
+#[test]
+fn kick_review_fast_deadband_chatter_does_not_rekick_but_ordinary_pwm_can_switch() {
+    let mut state = KickState::default();
+    let mut starts = 0;
+    let mut was = false;
+    for i in 0..100 {
+        let pd = if i % 2 == 0 { 4.0 } else { 2.0 };
+        let p = state.update(config(), kick(), pd, 0.01, i * 10).unwrap();
+        if p.kick_active && !was {
+            starts += 1;
+        }
+        was = p.kick_active;
+    }
+    assert_eq!(starts, 1); // 10ms zero periods cannot satisfy 300ms continuous rearm.
+    state.reset();
+    for i in 0..50 {
+        let pd = if i % 2 == 0 { 3.0 } else { 2.0 };
+        let p = state.update(config(), kick(), pd, 0.01, i * 10).unwrap();
+        assert!(!p.kick_active);
+        assert_eq!(p.final_pwm == 0.0, pd == 2.0); // Existing floor discontinuity, not repeated kicks.
+    }
+}

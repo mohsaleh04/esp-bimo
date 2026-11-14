@@ -76,7 +76,7 @@ fn calibration_pose_cannot_arm_and_live_requires_readiness() {
             kick(),
             70,
             true,
-            6_000_000,
+            policy::MAX_RESPONSE_WINDOW_US + 1,
             10_000_000
         )
         .is_none()
@@ -652,9 +652,23 @@ fn five_second_response_survives_shared_two_second_cap_then_disarms_permanently(
             kick(),
             70,
             true,
-            5_000_001,
+            policy::MAX_RESPONSE_WINDOW_US + 1,
             10_000_000
         )
         .is_none()
     );
+}
+
+#[test]
+fn explicit_abort_is_terminal_without_changing_suspended_pre_ready_recovery() {
+    let mut r = response(true);
+    r.fail(Fault::Invalid);
+    assert!(!r.finished);
+    assert_eq!(r.state(), ResponseState::WaitingForReady);
+    let mut r = response(true);
+    r.abort(Fault::Tilt);
+    assert!(r.finished);
+    assert_eq!(r.state(), ResponseState::Disarmed);
+    assert_eq!(r.disarm_reason, Some(DisarmReason::Fault(Fault::Tilt)));
+    assert!(r.sample(0.0, 0.0, true, 0.01, 10_000).is_none());
 }

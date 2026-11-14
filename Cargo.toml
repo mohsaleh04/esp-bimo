@@ -20,6 +20,16 @@ balance-test = []
 balance-live = ["balance-test"]
 balance-motor-response-test = ["balance-test"]
 balance-motor-response-live = ["balance-motor-response-test"]
+balance-ground-contact-test = ["balance-test"]
+balance-ground-contact-live = ["balance-ground-contact-test"]
+
+balance-bidirectional-ground-test = ["balance-test"]
+balance-bidirectional-ground-live = ["balance-bidirectional-ground-test"]
+
+[[bin]]
+name = "balance-bidirectional-ground-test"
+path = "src/bin/balance_bidirectional_ground_test.rs"
+required-features = ["balance-bidirectional-ground-test"]
 
 [[bin]]
 name = "motor-test"
@@ -55,6 +65,11 @@ required-features = ["balance-test"]
 name = "balance-motor-response-test"
 path = "src/bin/balance_motor_response_test.rs"
 required-features = ["balance-motor-response-test"]
+
+[[bin]]
+name = "balance-ground-contact-test"
+path = "src/bin/balance_ground_contact_test.rs"
+required-features = ["balance-ground-contact-test"]
 
 [dependencies]
 libm = "=0.2.16"
