@@ -25,7 +25,15 @@ mod events;
 pub mod ground;
 mod ground_timing;
 use events::{EventLog, Snapshot};
-use pwm_mapping::{Config, KickConfig};
+mod capture;
+mod control_profile;
+pub mod output;
+mod restart_assist;
+mod rolling_budget;
+mod settings;
+use settings::{
+    ARMING_TIMEOUT_US, KICK, MAPPING, MAX_LOOP_GAP_US, MOTOR_DUTY_CEILING, PD_OUTPUT_LIMIT,
+};
 
 pub struct RunConfig {
     pub label: &'static str,
@@ -34,26 +42,6 @@ pub struct RunConfig {
     pub ground: bool,
     pub preparation_secs: u64,
 }
-const MOTOR_DUTY_CEILING: u8 = 70;
-const ARMING_TIMEOUT_US: u64 = 10_000_000; // After preparation; includes readiness + neutral wait.
-const MAX_LOOP_GAP_US: u64 = 30_000;
-const PD_OUTPUT_LIMIT: i16 = 15; // Independent of ordinary PWM maximum.
-const MAPPING: Config = Config {
-    enabled: true,
-    deadband: 2.0,
-    pd_output_limit: PD_OUTPUT_LIMIT as f32,
-    minimum_duty: 30.0,
-    maximum_duty: 50.0,
-    slew_per_second: None,
-};
-const KICK: KickConfig = KickConfig {
-    enabled: true,
-    kick_duty: 70.0,
-    kick_duration_ms: 150,
-    trigger_threshold: 4.0,
-    rearm_delay_ms: 300,
-    reversal_pause_ms: 100,
-};
 
 #[derive(Clone, Copy)]
 struct Record {
@@ -154,13 +142,41 @@ fn log_ground_record(r: Record, log_max: u64) {
 
 #[allow(dead_code)]
 pub async fn run(config: RunConfig) -> ! {
-    run_profile(config, false).await
+    run_profile(config, false, false, output::AssistPolicy::Legacy).await
 }
 #[allow(dead_code)]
 pub async fn run_bidirectional(config: RunConfig) -> ! {
-    run_profile(config, true).await
+    run_profile(config, true, false, output::AssistPolicy::Legacy).await
 }
-async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
+#[allow(dead_code)]
+pub async fn run_balance_control(config: RunConfig) -> ! {
+    run_profile(config, true, true, output::AssistPolicy::Legacy).await
+}
+#[allow(dead_code)]
+pub async fn run_balance_control_assist(config: RunConfig, restart: bool) -> ! {
+    run_profile(
+        config,
+        true,
+        true,
+        if restart {
+            output::AssistPolicy::Fixed
+        } else {
+            output::AssistPolicy::Legacy
+        },
+    )
+    .await
+}
+#[allow(dead_code)] // Shared runtime also compiles in the unchanged response binaries.
+pub async fn run_balance_control_policy(config: RunConfig, policy: output::AssistPolicy) -> ! {
+    run_profile(config, true, true, policy).await
+}
+async fn run_profile(
+    config: RunConfig,
+    bidirectional: bool,
+    continuous: bool,
+    policy: output::AssistPolicy,
+) -> ! {
+    let restart = policy != output::AssistPolicy::Legacy;
     let live = config.live;
     let window_us = config.window_us;
     let preparation_secs = config.preparation_secs;
@@ -188,6 +204,17 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
         "{}: live={live}, ceiling={MOTOR_DUTY_CEILING}%, window={window_us}us. A=LEFT B=RIGHT; forward=(-u,+u). No serial input.",
         config.label
     );
+    if continuous {
+        info!(
+            "OUTPUT AUTHORITY: {}; mapper Kick {}; no independent assist budget coexists",
+            policy.label(),
+            if restart {
+                "disabled"
+            } else {
+                "legacy behavior"
+            }
+        );
+    }
     if !live {
         warn!("Movement disabled by diagnostic-specific feature/source gates; DRY only.");
     }
@@ -197,27 +224,41 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
             Timer::after_secs(1).await;
         }
     }
-    let Some(mut response) = Response::new(
-        Settings {
-            output_limit: PD_OUTPUT_LIMIT,
-            ..Settings::default()
-        },
-        MAPPING,
-        if bidirectional {
-            bidirectional::kick_config(KICK)
+    let Some(mut response) = (if continuous {
+        if restart {
+            control_profile::response_with_restart(live, true)
         } else {
-            KICK
-        },
-        MOTOR_DUTY_CEILING,
-        live,
-        window_us,
-        ARMING_TIMEOUT_US,
-    ) else {
+            control_profile::response(live)
+        }
+    } else {
+        Response::new(
+            Settings {
+                output_limit: PD_OUTPUT_LIMIT,
+                ..Settings::default()
+            },
+            MAPPING,
+            if bidirectional {
+                bidirectional::kick_config(KICK)
+            } else {
+                KICK
+            },
+            MOTOR_DUTY_CEILING,
+            live,
+            window_us,
+            ARMING_TIMEOUT_US,
+        )
+    }) else {
         warn!("Invalid duty/timing configuration; permanently disarmed.");
         loop {
             Timer::after_secs(1).await;
         }
     };
+    if continuous {
+        info!(
+            "CONTROL STATE {}",
+            control_profile::Stage::Calibrating.label()
+        );
+    }
     let setup = match calibration::initialize(&mut bus).await {
         Ok(imu) => calibration::learn_frame(&mut bus, &imu)
             .await
@@ -228,12 +269,21 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
         Ok(v) => v,
         Err(e) => {
             motors.disarm();
+            if continuous {
+                info!("CONTROL STATE {}", control_profile::Stage::Disarmed.label());
+            }
             warn!("Calibration failed: {e}; reset required.");
             loop {
                 Timer::after_secs(1).await;
             }
         }
     };
+    if continuous {
+        info!(
+            "CONTROL STATE {}",
+            control_profile::Stage::Preparing.label()
+        );
+    }
     info!(
         "Calibration valid; motors OFF. Secure wheels; preparation {preparation_secs}s. LIVE waits for 0.5s within +/-5deg and +/-5deg/s, then a NEW neutral sample (limited PD within +/-2). Motors stay disarmed in both waits (10s combined timeout). Only neutral acceptance starts the configured ACTIVE window; then tilt gently. Active telemetry prints AFTER disarm."
     );
@@ -245,6 +295,21 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
         "Response state={:?}; arming_timeout={ARMING_TIMEOUT_US}us begins now; ACTIVE window={window_us}us starts only on fresh post-ready neutral acceptance.",
         response.state()
     );
+    if continuous {
+        info!(
+            "CONTROL STATE {}",
+            control_profile::Stage::from_response(response.state()).label()
+        );
+    }
+    if continuous {
+        info!(
+            "CONTROL CAPTURE: acquisition has no serial writes; DRY stops after {}us; LIVE window remains {}us. Dump only after DISARMED; reset required.",
+            capture::DRY_CAPTURE_US,
+            control_profile::ACTIVE_US
+        );
+    }
+    let mut capture = capture::Capture::<Snapshot, 64>::new();
+    let mut behavior = control_profile::Behavior::default();
     let mut logged_transitions = 0;
     let mut previous_sample = None;
     let mut timing = LoopTiming::default();
@@ -256,7 +321,12 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
     let mut last_bus_error = None;
     let mut previous_accel_used = None;
     let mut events = EventLog::<32>::new();
-    let mut reversal = bidirectional::Interlock::default();
+    let mut reversal = output::MotorOutput::with_policy(if continuous {
+        policy
+    } else {
+        output::AssistPolicy::Legacy
+    });
+    reversal.confirm_zero(&mut motors, || epoch.elapsed().as_micros());
     let mut ground_guard = ground::GroundGuard::default();
     let mut ground_stop = None;
     let mut observed_sample_us = None;
@@ -278,6 +348,7 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
     let mut next_record = 0;
     loop {
         let now = epoch.elapsed().as_micros();
+        let mut control_pitch = None;
         response.tick(now);
         let previous_work_us = timing.work_us;
         let late = timing.begin(now, MAX_LOOP_GAP_US);
@@ -286,6 +357,13 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
         }
         if deadline_fault(config.ground, &mut motors, &mut response, late) {
             issue = "loop interval exceeded 30ms deadline";
+        }
+        if continuous {
+            control_profile::enforce(&mut response, &mut motors, late);
+        }
+        if continuous && response.state() == ResponseState::DryRun && now >= capture::DRY_CAPTURE_US
+        {
+            response.stop();
         }
         if response.finished {
             let _ = drive(
@@ -298,7 +376,15 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
             watchdog.disable();
             last_commanded = (0, 0);
             if bidirectional {
-                reversal.reset();
+                reversal.reset(epoch.elapsed().as_micros(), &response);
+            }
+            if continuous {
+                behavior.update(epoch.elapsed().as_micros(), response.state(), None, (0, 0));
+                info!(
+                    "CONTROL STATE {}; behavior={behavior:?}; reason={:?}",
+                    control_profile::Stage::Disarmed.label(),
+                    response.disarm_reason
+                );
             }
             events.observe(Snapshot {
                 us: now,
@@ -312,6 +398,7 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                 kick_ms: observed_preview.map(|p| p.kick_elapsed_ms),
                 requested: last_requested,
                 commanded: last_commanded,
+                assist: reversal.trace(epoch.elapsed().as_micros()),
                 reversal: bidirectional.then(|| reversal.telemetry(now)),
                 last_energized,
                 accel_used: observed_accel,
@@ -326,7 +413,8 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
             if bidirectional {
                 info!(
                     "BIDIR accepted_kicks={} first_applied={:?}",
-                    reversal.kicks, events.first_applied
+                    reversal.kicks(epoch.elapsed().as_micros()),
+                    events.first_applied
                 );
                 info!(
                     "BIDIR acknowledged_zero={:?}; release={:?}",
@@ -336,6 +424,15 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                     "BIDIR applied_kick_on={:?}; cancelled_or_expired={:?}",
                     events.last_applied_kick_on, events.last_applied_kick_off
                 );
+            }
+            if let Some(log) = reversal.recorder() {
+                info!(
+                    "RESTART ARBITER: overwritten={} first={:?} last={:?} terminal={:?}",
+                    log.overwritten, log.first_applied, log.last_applied, log.terminal
+                );
+                for t in log.recent() {
+                    info!("RESTART ARBITER {t:?}");
+                }
             }
             if config.ground {
                 info!(
@@ -367,6 +464,18 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                 "PINNED before_stop={:?}; TERMINAL={:?}",
                 events.before_terminal, events.terminal
             );
+            if continuous {
+                info!(
+                    "CONTROL CAPTURE: retained={} overwritten={} (periodic samples); missed_deadlines={} max_loop_us={}; terminal sample is pinned separately",
+                    capture.recent().count(),
+                    capture.overwritten,
+                    timing.missed_deadlines,
+                    timing.max_interval_us
+                );
+                for sample in capture.recent() {
+                    info!("CONTROL SAMPLE {sample:?}");
+                }
+            }
             for event in events.recent() {
                 info!("EVENT flags={} {:?}", event.flags, event.sample);
             }
@@ -375,6 +484,15 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                 .iter()
                 .flatten()
             {
+                if continuous {
+                    info!(
+                        "CONTROL STATE {} -> {} at {}us: {}",
+                        control_profile::Stage::from_response(event.from).label(),
+                        control_profile::Stage::from_response(event.to).label(),
+                        event.us,
+                        event.reason
+                    );
+                }
                 info!(
                     "STATE {:?} -> {:?} at {}us: {}; disarm_reason={:?}",
                     event.from,
@@ -394,6 +512,9 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                 }
                 Some(DisarmReason::ActiveTimeout) => {
                     "configured ACTIVE motor-response window expired"
+                }
+                Some(DisarmReason::Stop) if continuous => {
+                    "10-second motor-disabled DRY capture complete; reset required"
                 }
                 Some(DisarmReason::Fault(Fault::Stale)) => {
                     "last valid estimate exceeded 40ms freshness limit"
@@ -448,6 +569,7 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                         latest = None;
                     } else if let Some(est) = filter.update(&frame, a, corrected_g, dt) {
                         observed_pitch = Some(est.pitch_deg);
+                        control_pitch = Some(est.pitch_deg);
                         observed_rate = Some(est.rate_dps);
                         observed_accel = Some(est.accel_used);
                         issue = "valid estimator result";
@@ -474,7 +596,7 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                             if let Some(o) = output {
                                 reversal.preview(o, now);
                             } else {
-                                reversal.reset();
+                                reversal.reset(epoch.elapsed().as_micros(), &response);
                             }
                         }
                         observed_preview = output.map(|o| o.preview);
@@ -490,6 +612,13 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                         ) {
                             issue = "acquisition/filter work exceeded 30ms deadline";
                         }
+                        if continuous {
+                            control_profile::enforce(
+                                &mut response,
+                                &mut motors,
+                                timing.check_work(epoch.elapsed().as_micros(), MAX_LOOP_GAP_US),
+                            );
+                        }
                         if response.state() == ResponseState::Active && !response.finished {
                             if !motor_armed {
                                 watchdog.enable();
@@ -503,7 +632,11 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                                     &mut motors,
                                     &mut response,
                                     output,
-                                    MOTOR_DUTY_CEILING,
+                                    output::Observation {
+                                        sample_us: now,
+                                        pitch: est.pitch_deg,
+                                        rate: est.rate_dps,
+                                    },
                                     || epoch.elapsed().as_micros(),
                                 )
                             } else if config.ground {
@@ -539,8 +672,13 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                             } else if response.state() == ResponseState::Active
                                 && !response.finished
                             {
+                                if restart {
+                                    last_requested = reversal
+                                        .trace(epoch.elapsed().as_micros())
+                                        .map_or((0, 0), |t| wheel_commands(t.requested_pwm as i16));
+                                }
                                 last_commanded = if bidirectional {
-                                    reversal.applied
+                                    reversal.applied()
                                 } else {
                                     last_requested
                                 };
@@ -631,7 +769,31 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
         ) {
             issue = "sensor poll/loop work exceeded 30ms deadline";
         }
+        if continuous
+            && restart
+            && record.is_none()
+            && response.state() == ResponseState::Active
+            && !response.finished
+        {
+            if reversal
+                .service(&mut motors, &mut response, || epoch.elapsed().as_micros())
+                .is_err()
+            {
+                response.fail(Fault::Motor);
+            }
+            last_commanded = reversal.applied();
+            last_requested = reversal
+                .trace(epoch.elapsed().as_micros())
+                .map_or((0, 0), |t| wheel_commands(t.requested_pwm as i16));
+        }
         response.tick(epoch.elapsed().as_micros());
+        if continuous {
+            control_profile::enforce(
+                &mut response,
+                &mut motors,
+                timing.check_work(epoch.elapsed().as_micros(), MAX_LOOP_GAP_US),
+            );
+        }
         if response.state() != ResponseState::Active || response.finished {
             let _ = drive(
                 &mut motors,
@@ -648,9 +810,17 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
         if bidirectional
             && (response.finished || !response.control.sample_fresh(epoch.elapsed().as_micros()))
         {
-            reversal.reset();
+            reversal.reset(epoch.elapsed().as_micros(), &response);
         }
-        events.observe(Snapshot {
+        if continuous {
+            behavior.update(
+                epoch.elapsed().as_micros(),
+                response.state(),
+                control_pitch,
+                last_commanded,
+            );
+        }
+        let snapshot = Snapshot {
             us: epoch.elapsed().as_micros(),
             sample_us: observed_sample_us,
             state: response.state(),
@@ -658,10 +828,16 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
             rate: observed_rate,
             pd: response.limited_pd,
             mapped: observed_preview.map(|p| p.mapped_pwm),
-            kick: !response.finished && observed_preview.is_some_and(|p| p.kick_active),
+            kick: !response.finished
+                && if restart {
+                    reversal.telemetry(epoch.elapsed().as_micros()).kick_applied
+                } else {
+                    observed_preview.is_some_and(|p| p.kick_active)
+                },
             kick_ms: observed_preview.map(|p| p.kick_elapsed_ms),
             requested: last_requested,
             commanded: last_commanded,
+            assist: reversal.trace(epoch.elapsed().as_micros()),
             reversal: bidirectional.then(|| reversal.telemetry(epoch.elapsed().as_micros())),
             last_energized,
             accel_used: observed_accel,
@@ -672,8 +848,12 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
             loop_us: timing.interval_us,
             work_us: timing.work_us,
             missed: timing.missed_deadlines,
-        });
-        if !motor_armed {
+        };
+        events.observe(snapshot);
+        if continuous {
+            capture.record(snapshot.us, snapshot);
+        }
+        if !motor_armed && !continuous {
             for event in response.transitions()[logged_transitions..]
                 .iter()
                 .flatten()
@@ -727,7 +907,10 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
                 watchdog.disable();
             }
         }
-        if !motor_armed && epoch.elapsed().as_micros().saturating_sub(last_log) >= 200_000 {
+        if !continuous
+            && !motor_armed
+            && epoch.elapsed().as_micros().saturating_sub(last_log) >= 200_000
+        {
             let report_now = epoch.elapsed().as_micros();
             let age = latest.map(|r| report_now.saturating_sub(r.us));
             let fresh = response.control.sample_fresh(report_now);
@@ -742,7 +925,7 @@ async fn run_profile(config: RunConfig, bidirectional: bool) -> ! {
             if bidirectional {
                 info!(
                     "BIDIR PREVIEW requested={last_requested:?} simulated={:?} actual=(0,0) interlock={:?}",
-                    reversal.applied,
+                    reversal.applied(),
                     reversal.telemetry(report_now)
                 );
             }

@@ -16,6 +16,7 @@ pub struct Snapshot {
     pub requested: (i16, i16),
     pub reversal: Option<super::bidirectional::Telemetry>,
     pub commanded: (i16, i16),
+    pub assist: Option<super::restart_assist::Trace>,
     pub last_energized: (u64, i16, i16),
     pub accel_used: Option<bool>,
     pub rejection: Option<AccelRejection>,

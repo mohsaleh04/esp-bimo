@@ -33,7 +33,8 @@ cargo build --release --locked --features balance-bidirectional-ground-live --bi
 
 - Learned two-pose BMI160 calibration, complementary filter, Kp=1, Kd=0.08.
 - Limited PD ±15, deadband ≤2, ordinary proportional PWM 30–50%, no slew.
-- Initial Kick trigger: |limited PD| >=3 in this profile only (others remain 4).
+- Initial Kick trigger: |limited PD| >=3, also reused by the separate bounded
+  balance-control profile. Other response profiles retain 4.
 - Initial Kick candidate 70%, at most 150ms; zero PD/deadband can cancel sooner.
   This is NOT a forced pulse on arming. It requires a meaningful post-arm request.
 - Duty ceiling 70% applies to both ordinary and Kick requests; no bypass.

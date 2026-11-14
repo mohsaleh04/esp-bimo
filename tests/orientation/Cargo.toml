@@ -27,3 +27,11 @@ path = "../motor_response.rs"
 [[test]]
 name = "response-events"
 path = "../response_events.rs"
+
+[[test]]
+name = "balance-control"
+path = "../balance_control_replay.rs"
+
+[[example]]
+name = "balance-control-replay"
+path = "examples/balance_control_replay.rs"

@@ -195,6 +195,11 @@ impl Response {
         };
         self.transition(ResponseState::Disarmed, text);
     }
+    /// Explicit terminal stop, including a completed motor-disabled capture.
+    #[allow(dead_code)] // Other standalone policy consumers do not use bounded DRY capture.
+    pub fn stop(&mut self) {
+        self.finish(DisarmReason::Stop);
+    }
     pub fn sensor_fail(&mut self, reason: SensorFault) {
         self.sensor_fault = Some(reason);
         self.fail(Fault::Invalid);

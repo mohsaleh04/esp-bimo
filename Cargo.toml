@@ -26,6 +26,16 @@ balance-ground-contact-live = ["balance-ground-contact-test"]
 balance-bidirectional-ground-test = ["balance-test"]
 balance-bidirectional-ground-live = ["balance-bidirectional-ground-test"]
 
+balance-control-test = ["balance-test"]
+balance-control-live = ["balance-control-test"]
+balance-control-restart-assist = ["balance-control-test"]
+balance-control-rolling-assist = ["balance-control-test"]
+
+[[bin]]
+name = "balance-control-test"
+path = "src/bin/balance_control_test.rs"
+required-features = ["balance-control-test"]
+
 [[bin]]
 name = "balance-bidirectional-ground-test"
 path = "src/bin/balance_bidirectional_ground_test.rs"

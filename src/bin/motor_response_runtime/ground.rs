@@ -54,7 +54,7 @@ pub fn live_allowed(
 }
 
 pub fn window_valid(window_us: u64) -> bool {
-    window_us > 0 && window_us <= 1_000_000
+    window_us > 0 && window_us <= 30_000_000
 }
 
 /// Ground-only final gate: a veto/output error both latches policy AND calls the

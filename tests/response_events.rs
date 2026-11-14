@@ -17,6 +17,15 @@ mod policy;
 #[allow(dead_code)]
 #[path = "../src/pwm_mapping.rs"]
 mod pwm_mapping;
+#[allow(dead_code)]
+#[path = "../src/bin/motor_response_runtime/restart_assist.rs"]
+mod restart_assist;
+#[allow(dead_code)]
+#[path = "../src/bin/motor_response_runtime/rolling_budget.rs"]
+mod rolling_budget;
+#[allow(dead_code)]
+#[path = "../src/bin/motor_response_runtime/settings.rs"]
+mod settings;
 use events::{EventLog, Snapshot};
 use policy::{DisarmReason, ResponseState, SensorFault};
 fn snapshot(us: u64) -> Snapshot {
@@ -33,6 +42,7 @@ fn snapshot(us: u64) -> Snapshot {
         requested: (-33, 33),
         reversal: None,
         commanded: (-33, 33),
+        assist: None,
         last_energized: (us, -33, 33),
         accel_used: Some(true),
         rejection: None,
@@ -115,7 +125,7 @@ fn normal_empty_polls_do_not_fabricate_sensor_events_or_overwrite_measurement_ti
     assert_eq!(log.last_rejection.unwrap().us, 10);
 }
 #[test]
-fn every_ground_opt_in_and_short_window_are_mandatory() {
+fn every_ground_opt_in_and_configured_window_are_mandatory() {
     for bits in 0..32 {
         assert_eq!(
             ground::live_allowed(
@@ -130,7 +140,8 @@ fn every_ground_opt_in_and_short_window_are_mandatory() {
     }
     assert!(!ground::window_valid(0));
     assert!(ground::window_valid(1_000_000));
-    assert!(!ground::window_valid(1_000_001));
+    assert!(ground::window_valid(30_000_000));
+    assert!(!ground::window_valid(30_000_001));
 }
 fn preview(kick: bool, final_pwm: f32) -> pwm_mapping::Preview {
     pwm_mapping::Preview {
@@ -1083,4 +1094,101 @@ fn threshold_reversal_after_mapper_cooldown_still_cannot_apply_another_kick() {
         assert_eq!(g.kicks, 1);
         assert!(!g.kicking);
     }
+}
+
+#[path = "../src/bin/motor_response_runtime/capture.rs"]
+mod capture;
+#[test]
+fn capture_saturation_keeps_recent_samples_and_terminal_fault_context() {
+    let mut capture = capture::Capture::<Snapshot, 2>::new();
+    let mut events = EventLog::<2>::new();
+    for i in 0..100 {
+        let mut s = snapshot(i * 100_000);
+        s.requested = (i as i16, -(i as i16));
+        capture.record(s.us, s);
+        events.observe(s);
+    }
+    assert_eq!(capture.overwritten, 98);
+    assert_eq!(
+        capture.recent().map(|s| s.us).collect::<Vec<_>>(),
+        vec![9_800_000, 9_900_000]
+    );
+    let mut terminal = snapshot(10_000_000);
+    terminal.state = ResponseState::Disarmed;
+    terminal.commanded = (0, 0);
+    terminal.disarm = Some(DisarmReason::Fault(balance::Fault::Timing));
+    terminal.missed = 95;
+    events.observe(terminal);
+    assert_eq!(events.terminal.unwrap().missed, 95);
+    assert_eq!(events.terminal.unwrap().commanded, (0, 0));
+    assert_eq!(events.terminal.unwrap().disarm, terminal.disarm);
+}
+#[test]
+fn capture_rate_limit_never_backfills_or_resets_timing_counters() {
+    let mut capture = capture::Capture::<u64, 2>::new();
+    let mut timing = policy::LoopTiming::default();
+    assert!(!timing.begin(0, 30_000));
+    capture.record(0, 0);
+    assert!(timing.begin(38_246, 30_000));
+    capture.record(38_246, 38_246);
+    assert_eq!(timing.missed_deadlines, 1);
+    assert_eq!(timing.max_interval_us, 38_246);
+    assert!(!timing.begin(39_246, 30_000));
+    capture.record(39_246, 39_246);
+    assert_eq!(capture.recent().collect::<Vec<_>>(), vec![0]);
+    capture.record(100_000, 100_000);
+    capture.record(900_000, 900_000);
+    assert_eq!(capture.recent().collect::<Vec<_>>(), vec![100_000, 900_000]);
+    assert_eq!(capture.overwritten, 1);
+    assert_eq!(timing.missed_deadlines, 1);
+    assert_eq!(timing.max_interval_us, 38_246);
+}
+#[test]
+fn saturated_capture_cannot_block_deadline_disarm_or_terminal_stop() {
+    let (mut r, mut m, _, old) = active_ground(1);
+    let mut capture = capture::Capture::<u64, 1>::new();
+    for i in 0..100 {
+        capture.record(i * 100_000, i);
+    }
+    assert_eq!(capture.overwritten, 99);
+    let mut timing = policy::LoopTiming::default();
+    timing.begin(530_000, 30_000);
+    let late = timing.begin(568_246, 30_000);
+    assert!(ground::deadline(&mut m, &mut r, late));
+    // Observe actual driver shutdown BEFORE reading/formatting the full recorder.
+    assert_eq!(m.outputs, (0, 0));
+    assert!(!m.armed);
+    assert!(r.finished);
+    assert_eq!(
+        r.disarm_reason,
+        Some(DisarmReason::Fault(balance::Fault::Timing))
+    );
+    assert_eq!(capture.recent().collect::<Vec<_>>(), vec![99]);
+    policy::drive(&mut m, &mut r, Some(old), 70, 568_246).unwrap();
+    assert_eq!(m.outputs, (0, 0));
+    assert_eq!(timing.missed_deadlines, 1);
+    r.stop();
+    assert_eq!(
+        r.disarm_reason,
+        Some(DisarmReason::Fault(balance::Fault::Timing))
+    );
+}
+#[test]
+fn dry_capture_stop_is_permanent_and_output_gate_disarms_before_dump() {
+    use motors::DualMotor;
+    let mut r = ground_response(false);
+    let o = r.sample(4.0, 0.0, true, 0.01, 0).unwrap();
+    let mut m = Fake::default();
+    m.arm();
+    m.command(-70, 70).unwrap();
+    r.stop();
+    policy::drive(&mut m, &mut r, Some(o), 70, capture::DRY_CAPTURE_US).unwrap();
+    assert_eq!(m.outputs, (0, 0));
+    assert!(!m.armed);
+    assert_eq!(r.disarm_reason, Some(DisarmReason::Stop));
+    assert!(
+        r.sample(0.0, 0.0, true, 0.01, capture::DRY_CAPTURE_US + 10_000)
+            .is_none()
+    );
+    assert_eq!(r.state(), ResponseState::Disarmed);
 }
