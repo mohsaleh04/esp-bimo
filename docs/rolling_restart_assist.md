@@ -8,12 +8,12 @@ The fixed lifetime two-pulse policy remains selectable with
 
 | Parameter | Rolling policy |
 |---|---:|
-| Window | 5 seconds |
+| Window | 1.5 seconds |
 | Pulse count | 2, shared across directions |
 | Assist-on budget | 300 ms per window |
 | Individual pulse maximum | 150 ms |
 | Duty ceiling | 70% |
-| Cooldown after acknowledged pulse end | 1 second |
+| Cooldown after acknowledged pulse end | 300 ms |
 | Acknowledged zero interval | 100 ms |
 | Fresh stable demand dwell | 20 ms |
 
@@ -25,7 +25,7 @@ No command implies measured wheel speed or successful movement.
 ## Ledger and recovery
 
 A fixed two-entry ledger records accepted assist start and acknowledged end times.
-Active entries never expire. Completed entries remain until **end + 5 seconds**;
+Active entries never expire. Completed entries remain until **end + 1.5 seconds**;
 expiry is inclusive at that timestamp. Full retained durations are charged rather
 than only their overlap with the trailing window. This conservative rule can delay
 recovery, but never grants extra credit at a partial-overlap boundary. Timestamp
@@ -34,7 +34,7 @@ an unexpired pulse. An unexpected acknowledgement/accounting failure latches a f
 
 Every pulse overlapping the trailing window is retained, and its charged duration
 is at least the overlap. Thus the ledger's two-entry and 300 ms limits also bound
-every trailing five-second interval, subject to the existing scheduler/IO bounds.
+every trailing 1.5-second interval, subject to the existing scheduler/IO bounds.
 Those bounds are tested with independent clipped-interval accounting, including
 pulse endpoints, expiry endpoints and +/-1 us boundaries. Software cannot guarantee
 pulse termination during a CPU hang; independent motor-power cutoff remains required.
@@ -77,7 +77,7 @@ cargo build --offline --release --locked --bin balance-control-test \
   --features balance-control-test,balance-control-rolling-assist
 ```
 
-Two pulses and 300 ms per five seconds bound assist command time to 6%; they do
+Two pulses and 300 ms per 1.5 seconds bound assist command time to 20%; they do
 not bound electrical energy, temperature or ordinary stalled-motor current. Supply,
 loaded response, mechanical restraint and independent power cutoff still need
 hardware verification. This is neither autonomous balancing validation nor permission

@@ -1,5 +1,5 @@
 //! Conservative trailing-window accounting, never a resetting/overwriting bucket.
-pub const WINDOW_US: u64 = 5_000_000;
+pub const WINDOW_US: u64 = 1_500_000;
 pub const CAPACITY: usize = 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Interval {

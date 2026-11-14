@@ -8,13 +8,13 @@ fn ledger_expiry_is_end_plus_window_with_exact_microsecond_boundaries() {
     let mut b = Ledger::new();
     b.begin(0).unwrap();
     b.end(40_000).unwrap();
-    let before = b.snapshot(5_039_999);
+    let before = b.snapshot(1_539_999);
     assert_eq!(before.pulses_used, 1);
     assert_eq!(before.on_us, 40_000);
-    assert_eq!(before.recovery_at_us, Some(5_040_000));
+    assert_eq!(before.recovery_at_us, Some(1_540_000));
     assert_eq!(before.recovery_in_us, Some(1));
-    assert_eq!(b.snapshot(5_040_000).pulses_used, 0);
-    assert_eq!(b.snapshot(5_040_001).on_us, 0);
+    assert_eq!(b.snapshot(1_540_000).pulses_used, 0);
+    assert_eq!(b.snapshot(1_540_001).on_us, 0);
 }
 #[test]
 fn partial_overlaps_are_charged_in_full_and_fixed_boundaries_do_not_reset() {
@@ -23,30 +23,30 @@ fn partial_overlaps_are_charged_in_full_and_fixed_boundaries_do_not_reset() {
     b.end(40_000).unwrap();
     b.begin(1_040_000).unwrap();
     b.end(1_088_000).unwrap();
-    for t in [4_999_999, 5_000_000, 5_000_001, 5_039_999] {
+    for t in [1_499_999, 1_500_000, 1_500_001, 1_539_999] {
         let w = b.snapshot(t);
         assert_eq!(w.pulses_used, 2);
         assert_eq!(w.on_us, 88_000);
     }
-    let w = b.snapshot(5_040_000);
+    let w = b.snapshot(1_540_000);
     assert_eq!(w.pulses_used, 1);
     assert_eq!(w.on_us, 48_000);
-    assert_eq!(w.recovery_at_us, Some(6_088_000));
-    assert_eq!(b.snapshot(6_087_999).pulses_used, 1);
-    assert_eq!(b.snapshot(6_088_000).pulses_used, 0);
+    assert_eq!(w.recovery_at_us, Some(2_588_000));
+    assert_eq!(b.snapshot(2_587_999).pulses_used, 1);
+    assert_eq!(b.snapshot(2_588_000).pulses_used, 0);
 }
 #[test]
 fn active_and_bucket_crossing_pulses_cannot_expire_early() {
     let mut b = Ledger::new();
-    b.begin(4_990_000).unwrap();
+    b.begin(1_490_000).unwrap();
     let w = b.snapshot(20_000_000);
     assert_eq!(w.pulses_used, 1);
     assert!(w.on_us > 150_000);
     assert_eq!(w.recovery_at_us, None); // A missing end ACK is never silently forgotten.
     assert!(b.begin(20_000_000).is_err());
-    b.end(5_040_000).unwrap();
-    assert_eq!(b.snapshot(10_039_999).on_us, 50_000);
-    assert_eq!(b.snapshot(10_040_000).pulses_used, 0);
+    b.end(1_540_000).unwrap();
+    assert_eq!(b.snapshot(3_039_999).on_us, 50_000);
+    assert_eq!(b.snapshot(3_040_000).pulses_used, 0);
 }
 #[test]
 fn full_ledger_cannot_overwrite_unexpired_entries() {
@@ -55,12 +55,12 @@ fn full_ledger_cannot_overwrite_unexpired_entries() {
     b.end(40_000).unwrap();
     b.begin(1_040_000).unwrap();
     b.end(1_088_000).unwrap();
-    let original = b.snapshot(2_000_000);
-    assert!(b.begin(2_000_000).is_err());
-    assert_eq!(original, b.snapshot(2_000_000));
-    assert!(b.begin(5_039_999).is_err());
-    b.begin(5_040_000).unwrap();
-    let w = b.snapshot(5_040_000);
+    let original = b.snapshot(1_400_000);
+    assert!(b.begin(1_400_000).is_err());
+    assert_eq!(original, b.snapshot(1_400_000));
+    assert!(b.begin(1_539_999).is_err());
+    b.begin(1_540_000).unwrap();
+    let w = b.snapshot(1_540_000);
     assert_eq!(w.pulses_used, 2);
     assert!(
         w.retained
@@ -68,7 +68,7 @@ fn full_ledger_cannot_overwrite_unexpired_entries() {
             .flatten()
             .any(|p| p.start_us == 1_040_000 && p.end_us == Some(1_088_000))
     );
-    assert!(b.begin(5_040_001).is_err());
+    assert!(b.begin(1_540_001).is_err());
 }
 #[test]
 fn expiry_addition_overflow_does_not_create_free_credit() {
@@ -191,7 +191,7 @@ impl Trial {
         let first = self.start(1.0);
         self.until(first + 30_000, 3.0);
         self.step(0.0); // 40ms
-        self.hold(110, 0.0);
+        self.hold(40, 0.0);
         let second = self.start(-1.0);
         self.until(second + 38_000, -3.0);
         self.step_at(second + 48_000, 0.0);
@@ -214,6 +214,9 @@ impl Trial {
         }
         assert!(count <= 2, "{count} overlapping pulses at {t}");
         assert!(on <= 300_000, "{on} assist us at {t}");
+        for pair in self.history.windows(2) {
+            assert!(pair[1].start - pair[0].end.unwrap() >= 300_000);
+        }
         for p in &self.history {
             if let Some(end) = p.end {
                 assert!(end - p.start <= 150_000);
@@ -229,7 +232,7 @@ fn repeated_restarts_recover_credit_and_obey_every_trailing_window() {
         s.hold(20, if n % 2 == 0 { 3.0 } else { -3.0 });
     }
     assert!(s.history.len() > 2);
-    assert!(s.history.len() <= 12);
+    assert!(s.history.len() <= 2 * (s.now / WINDOW_US + 1) as usize);
     s.r.stop();
     s.step(0.0);
     assert_eq!(s.m.outputs, (0, 0));
@@ -387,10 +390,10 @@ fn rolling_time_budget_can_exhaust_before_slots_and_recovers_without_reset() {
     assert_eq!(trace.pulses_remaining, 1);
     assert_eq!(trace.window.unwrap().on_us, 80_000);
     assert_eq!(trace.suppressed, Some(Reason::WindowTimeLimit));
-    for t in (250_000..=5_230_000).step_by(10_000) {
+    for t in (250_000..=1_730_000).step_by(10_000) {
         pure_step(&mut a, t, 3);
     }
-    let t = a.status(5_230_000);
+    let t = a.status(1_730_000);
     assert_eq!(t.pulses_remaining, 2);
     assert_eq!(t.time_remaining_us, 140_000);
     assert!(!t.applied);
@@ -476,4 +479,46 @@ fn rolling_assist_uses_robot_direction_for_requested_and_applied_duty() {
         assert!(t.applied);
         assert_eq!(t.commanded_pwm, expected);
     }
+}
+
+#[test]
+fn rolling_timing_changes_do_not_relax_fixed_policy_cooldown() {
+    assert_eq!(WINDOW_US, 1_500_000);
+    assert_eq!(Config::rolling_defaults().cooldown_us, 300_000);
+    assert_eq!(Config::default().cooldown_us, 1_000_000);
+    let mut fixed = Assist::new(Config {
+        cooldown_us: 300_000,
+        ..Config::default()
+    });
+    fixed.acknowledge(0, 0.0, false);
+    assert_eq!(
+        pure_step(&mut fixed, 10_000, 0).suppressed,
+        Some(Reason::Fault(restart_assist::Fault::InvalidConfig))
+    );
+}
+
+#[test]
+fn rolling_cooldown_expires_at_300ms_after_acknowledged_end() {
+    let mut a = Assist::new_rolling(Config {
+        enabled: true,
+        ..Config::rolling_defaults()
+    });
+    a.acknowledge(0, 0.0, false);
+    for t in (0..=120_000).step_by(10_000) {
+        pure_step(&mut a, t, 0);
+    }
+    for t in (130_000..=160_000).step_by(10_000) {
+        pure_step(&mut a, t, 3);
+    }
+    assert!(a.status(160_000).applied);
+    assert!(!pure_step(&mut a, 170_000, 0).applied);
+    for t in (180_000..=460_000).step_by(10_000) {
+        pure_step(&mut a, t, 0);
+    }
+    assert_eq!(pure_step(&mut a, 469_999, 0).cooldown_remaining_us, 1);
+    assert_eq!(pure_step(&mut a, 470_000, 0).cooldown_remaining_us, 0);
+    for t in [480_000, 490_000, 500_000] {
+        pure_step(&mut a, t, 3);
+    }
+    assert!(a.status(500_000).applied);
 }

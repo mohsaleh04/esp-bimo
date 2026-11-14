@@ -32,16 +32,17 @@ impl Config {
     pub fn rolling_defaults() -> Self {
         Self {
             enabled: false,
+            cooldown_us: 300_000,
             ..Self::default()
         }
     }
-    fn valid(self) -> bool {
+    fn valid(self, rolling: bool) -> bool {
         self.duty.is_finite()
             && self.duty > 0.0
             && self.duty <= f32::from(settings::MOTOR_DUTY_CEILING)
             && self.pulse_us > STOP_RESERVE_US
             && self.pulse_us <= 150_000
-            && self.cooldown_us >= 1_000_000
+            && self.cooldown_us >= if rolling { 300_000 } else { 1_000_000 }
             && self.max_pulses > 0
             && self.max_pulses <= 2
             && self.total_us > STOP_RESERVE_US
@@ -245,7 +246,7 @@ impl Assist {
         }
         self.requested = false;
         self.eligible = false;
-        if !self.config.valid() {
+        if !self.config.valid(self.rolling.is_some()) {
             self.fault.get_or_insert(Fault::InvalidConfig);
         }
         if self

@@ -21,7 +21,7 @@ impl AssistPolicy {
         match self {
             Self::Legacy => "legacy: one Kick",
             Self::Fixed => "Restart Assist: two total pulses",
-            Self::Rolling => "Rolling Restart Assist: two pulses per 5 seconds",
+            Self::Rolling => "Rolling Restart Assist: two pulses per 1.5 seconds",
         }
     }
 }
