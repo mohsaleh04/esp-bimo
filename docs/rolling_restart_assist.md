@@ -83,3 +83,7 @@ loaded response, mechanical restraint and independent power cutoff still need
 hardware verification. This is neither autonomous balancing validation nor permission
 to run unrestrained. Window recovery intentionally permits recurring experimental
 assistance; the configured ACTIVE timeout remains the outer limit.
+
+A separate, default-off [pre-cutoff recovery experiment](pre_cutoff_recovery.md)
+can qualify a bounded same-demand retry per observed deterioration episode. Without that additional feature the original
+fresh-request requirement remains unchanged.

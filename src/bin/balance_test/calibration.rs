@@ -19,16 +19,40 @@ pub fn observation(sample: ImuSample) -> (Vector, Vector) {
 }
 pub async fn initialize(bus: &mut I2c<'_, Blocking>) -> Result<Bmi160, &'static str> {
     for address in [0x68, 0x69] {
-        if let Ok(imu) = Bmi160::init(bus, address).await {
+        let started = Instant::now();
+        let imu = match Bmi160::init(bus, address).await {
+            Ok(imu) => imu,
+            Err(error) => {
+                warn!(
+                    "BMI160 init address=0x{address:02X} failed after {}us: {error:?}; motors remain disarmed",
+                    started.elapsed().as_micros()
+                );
+                continue;
+            }
+        };
+        {
             let mut config = [0; 4];
             bus.write_read(address, &[0x40], &mut config)
-                .map_err(|_| "BMI160 configuration read failed")?;
+                .map_err(|error| {
+                    warn!("BMI160 init address=0x{address:02X} stage=rate/range readback READ registers=0x40..0x43 I2C={error:?} timeout={}", matches!(error, esp_hal::i2c::master::Error::Timeout));
+                    "BMI160 configuration read failed"
+                })?;
             if config != [0x28, 0x03, 0x28, 0x00] {
+                warn!(
+                    "BMI160 init address=0x{address:02X} rate/range mismatch: actual={config:02X?} expected=[28, 03, 28, 00]"
+                );
                 return Err("unexpected BMI160 rate/range configuration");
             }
+            info!(
+                "BMI160 init address=0x{address:02X} OK after {}us; rate/range={config:02X?}; motors remain disarmed",
+                started.elapsed().as_micros()
+            );
             return Ok(imu);
         }
     }
+    warn!(
+        "BMI160 init failed at both 0x68 and 0x69; see per-address stage/error above; no automatic retry"
+    );
     Err("BMI160 initialization failed")
 }
 async fn stationary(

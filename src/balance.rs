@@ -3,7 +3,8 @@
 pub const KI: f32 = 0.0; // No integral state or automatic friction compensation.
 pub const ARM_ANGLE_DEG: f32 = 5.0;
 pub const ARM_RATE_DPS: f32 = 5.0;
-pub const FALL_ANGLE_DEG: f32 = 15.0;
+pub const FALL_ANGLE_DEG: f32 = 15.0; // Existing standalone/response diagnostics.
+pub const CONTROL_FALL_ANGLE_DEG: f32 = 21.0;
 pub const UPRIGHT_DWELL_US: u64 = 500_000;
 pub const MAX_SAMPLE_GAP_US: u64 = 40_000;
 pub const MAX_ACTIVE_US: u64 = 2_000_000; // Short first experiments, never unattended.
@@ -88,6 +89,7 @@ pub struct Controller {
     last_sample: Option<u64>,
     upright_since: Option<u64>,
     active_since: Option<u64>,
+    tilt_limit: f32,
 }
 impl Controller {
     pub fn new(settings: Settings, calibrated: bool, live_allowed: bool) -> Option<Self> {
@@ -102,7 +104,23 @@ impl Controller {
             last_sample: None,
             upright_since: None,
             active_since: None,
+            tilt_limit: FALL_ANGLE_DEG,
         })
+    }
+    /// Select a profile cutoff before any control samples/arming.
+    pub fn with_tilt_limit(mut self, limit: f32) -> Option<Self> {
+        if self.last_sample.is_some()
+            || matches!(self.state, State::Active | State::Fault(_))
+            || !limit.is_finite()
+            || !(ARM_ANGLE_DEG..=CONTROL_FALL_ANGLE_DEG).contains(&limit)
+        {
+            return None;
+        }
+        self.tilt_limit = limit;
+        Some(self)
+    }
+    pub fn tilt_limit(&self) -> f32 {
+        self.tilt_limit
     }
     pub fn state(&self) -> State {
         self.state
@@ -135,7 +153,7 @@ impl Controller {
                 self.upright_since = None;
             }
         }
-        if self.state == State::Active && pitch.abs() >= FALL_ANGLE_DEG {
+        if self.state == State::Active && pitch.abs() >= self.tilt_limit {
             self.fault(Fault::Tilt);
             return;
         }

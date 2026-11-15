@@ -88,6 +88,11 @@ pub struct Output {
     pub preview: Preview,
 }
 impl Response {
+    #[allow(dead_code)] // Shared policy: selected explicitly only by balance-control.
+    pub fn with_tilt_limit(mut self, limit: f32) -> Option<Self> {
+        self.control = self.control.with_tilt_limit(limit)?;
+        Some(self)
+    }
     pub fn new(
         settings: Settings,
         mapping: Config,
@@ -328,7 +333,7 @@ impl Response {
             self.accel_correction_age_us = Some(0);
             self.sensor_fault = None;
         }
-        if self.supervising() && pitch.abs() >= balance::FALL_ANGLE_DEG {
+        if self.supervising() && pitch.abs() >= self.control.tilt_limit() {
             self.fail(Fault::Tilt);
             return None;
         }

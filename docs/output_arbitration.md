@@ -2,7 +2,7 @@
 
 Only `balance-control-test` can select the new mode. It is DISABLED by default.
 The 30,000,000us ACTIVE window, gains, ordinary mapping/deadband, motor polarity,
-70% ceiling, ±15° cutoff, 30ms deadline and sensor validity policy are unchanged.
+70% ceiling, ±21° cutoff, 30ms deadline and sensor validity policy are unchanged.
 No hardware was flashed or operated during implementation.
 
 ## One selected authority

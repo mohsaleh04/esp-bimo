@@ -78,7 +78,7 @@ Callers must acknowledge only successful driver completion, with completion
 clock, integer signed duty and assist classification. Ordinary PWM quantization
 matches the existing signed-integer driver API. Bad/mismatched acknowledgements,
 nonfinite input, nonmonotonic time, stale samples, control gaps >30ms, sensor
-fault, |pitch|>=15deg, timeout and disarm latch zero proposals. The host adapter
+fault, |pitch|>=21deg, timeout and disarm latch zero proposals. The host adapter
 actually stops its in-memory driver before recording fault completion. A future
 hardware adapter would have to provide the same physical-stop ordering.
 

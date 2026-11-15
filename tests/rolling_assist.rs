@@ -413,7 +413,7 @@ fn rolling_faults_tilt_and_deadline_remain_permanent_after_credit_recovers() {
                 s.step_at(s.now + 30_001, 3.0);
             }
             2 => {
-                s.step(15.0);
+                s.step(21.0);
             }
             _ => {
                 s.m.reject = true;

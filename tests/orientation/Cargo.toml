@@ -35,3 +35,15 @@ path = "../balance_control_replay.rs"
 [[example]]
 name = "balance-control-replay"
 path = "examples/balance_control_replay.rs"
+
+[[test]]
+name = "motor-duty-characterization"
+path = "../motor_duty_characterization.rs"
+
+[[test]]
+name = "motor-continuation-characterization"
+path = "../motor_continuation_characterization.rs"
+
+[features]
+balance-control-recovery-assist = []
+balance-control-short-recovery-zero = ["balance-control-recovery-assist"]

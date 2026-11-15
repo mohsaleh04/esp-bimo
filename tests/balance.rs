@@ -136,8 +136,10 @@ fn denied_request_is_fail_closed_even_from_an_active_state() {
 }
 #[test]
 fn settings_reject_unsafe_or_nonfinite_values_and_tilt_limit_is_inclusive() {
-    let mut s = Settings::default();
-    s.output_limit = 31;
+    let mut s = Settings {
+        output_limit: 31,
+        ..Default::default()
+    };
     assert!(Controller::new(s, true, true).is_none());
     s = Settings::default();
     s.kp = f32::NAN;
@@ -251,4 +253,34 @@ fn automatic_dry_startup_needs_no_upright_pose_or_serial_and_never_grants_live()
     assert_eq!(c.state(), State::DryRun); // Upright readiness never auto-arms.
     assert!(c.request(Request::Arm, 640_000).is_err());
     assert_ne!(c.state(), State::Active);
+}
+
+#[test]
+fn control_profile_cutoff_is_21_inclusive_and_latched_without_changing_default() {
+    assert_eq!(FALL_ANGLE_DEG, 15.0);
+    assert_eq!(CONTROL_FALL_ANGLE_DEG, 21.0);
+    for sign in [1.0, -1.0] {
+        let mut c = Controller::new(Settings::default(), true, true)
+            .unwrap()
+            .with_tilt_limit(CONTROL_FALL_ANGLE_DEG)
+            .unwrap();
+        for t in (0..=600_000).step_by(20_000) {
+            c.sample(0.0, 0.0, t);
+        }
+        c.request(Request::Arm, 600_000).unwrap();
+        c.sample(sign * 20.999, 0.0, 620_000);
+        assert_eq!(c.state(), State::Active);
+        c.sample(sign * 21.0, 0.0, 640_000);
+        assert_eq!(c.state(), State::Fault(Fault::Tilt));
+        c.sample(0.0, 0.0, 660_000);
+        assert_eq!(c.state(), State::Fault(Fault::Tilt));
+    }
+    for limit in [f32::NAN, f32::INFINITY, 0.0, 21.001] {
+        assert!(
+            Controller::new(Settings::default(), true, true)
+                .unwrap()
+                .with_tilt_limit(limit)
+                .is_none()
+        );
+    }
 }

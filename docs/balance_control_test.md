@@ -49,7 +49,7 @@ are printed AFTER motor shutdown, never as blocking logs in the powered loop.
   driver's successful completion timestamp. Sensor/control polling continues;
   rapid direction chatter restarts/cancels the wait conservatively. This is NOT
   measured wheel stop, braking, or protection against all reversal current.
-- |pitch|≥15° cuts output, sample/gyro freshness ≤40ms, accepted accelerometer
+- |pitch|≥21° cuts output, sample/gyro freshness ≤40ms, accepted accelerometer
   correction age ≤50ms during ACTIVE, control-loop deadline ≤30ms. Invalid,
   clipped/nonfinite gyro, invalid estimates, I2C and driver errors disarm.
 - New-profile sensor/timing faults also permanently latch during readiness.
@@ -194,3 +194,9 @@ behind its own feature/source gate; all five source gates are false. The
 For the separately gated, default-disabled recurring budget experiment, see
 [Rolling Restart Assist](rolling_restart_assist.md). It preserves the 30-second
 ACTIVE window and all existing output/sensor interlocks.
+
+The balance-control cutoff is explicitly 21 degrees (inclusive). Older standalone,
+suspended-wheel and ground-response profiles retain their 15-degree default. The
+recovery projected limit is derived as 21 minus the existing 3-degree margin,
+yielding 18 degrees; its minimum-angle eligibility and all other parameters remain
+unchanged. The linear projection is not a guarantee of future physical tilt.

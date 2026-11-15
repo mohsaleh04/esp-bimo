@@ -122,7 +122,7 @@ pub fn sample(
         if !pitch.is_finite() || !rate.is_finite() {
             response.sensor_fault = Some(SensorFault::NonFiniteEstimate);
             response.abort(crate::balance::Fault::Invalid);
-        } else if pitch.abs() >= crate::balance::FALL_ANGLE_DEG {
+        } else if pitch.abs() >= response.control.tilt_limit() {
             response.abort(crate::balance::Fault::Tilt);
         }
     }

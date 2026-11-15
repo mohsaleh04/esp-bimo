@@ -57,7 +57,8 @@ pub fn response_with_restart(live: bool, restart: bool) -> Option<Response> {
         live,
         ACTIVE_US,
         settings::ARMING_TIMEOUT_US,
-    )
+    )?
+    .with_tilt_limit(balance::CONTROL_FALL_ANGLE_DEG)
 }
 /// Stricter new-profile policy: faults also latch before readiness. DRY is observation only.
 pub fn enforce(response: &mut Response, motors: &mut impl DualMotor, late: bool) {

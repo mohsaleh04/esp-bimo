@@ -13,6 +13,8 @@ path = "./src/bin/main.rs"
 default = []
 motor-test = []
 motor-pwm-diagnostic = []
+motor-duty-characterization = []
+motor-continuation-characterization = []
 motor-kick-diagnostic = []
 motor-kick-live = ["motor-kick-diagnostic"]
 orientation-diagnostic = []
@@ -30,6 +32,8 @@ balance-control-test = ["balance-test"]
 balance-control-live = ["balance-control-test"]
 balance-control-restart-assist = ["balance-control-test"]
 balance-control-rolling-assist = ["balance-control-test"]
+balance-control-recovery-assist = ["balance-control-rolling-assist"]
+balance-control-short-recovery-zero = ["balance-control-recovery-assist"]
 
 [[bin]]
 name = "balance-control-test"
@@ -120,3 +124,13 @@ codegen-units = 1     # LLVM can perform better optimizations using a single thr
 debug = 2     # prefer slower builds but better debugging experience
 lto = 'fat'
 opt-level = 's'
+
+[[bin]]
+name = "motor-duty-characterization"
+path = "src/bin/motor_duty_characterization.rs"
+required-features = ["motor-duty-characterization"]
+
+[[bin]]
+name = "motor-continuation-characterization"
+path = "src/bin/motor_continuation_characterization.rs"
+required-features = ["motor-continuation-characterization"]

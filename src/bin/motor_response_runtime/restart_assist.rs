@@ -2,7 +2,12 @@
 //! Acknowledgements describe accepted software commands, never measured wheel speed.
 use super::{bidirectional::DEAD_TIME_US, rolling_budget, settings};
 // One interval to schedule the next decision, one for acknowledged command IO.
+#[path = "recovery.rs"]
+pub mod recovery;
 const STOP_RESERVE_US: u64 = 2 * settings::MAX_LOOP_GAP_US;
+const TARGET_PULSE_US: u64 = 100_000;
+const RECOVERY_IO_LIMIT_US: u64 = 20_000;
+const INWARD_RATE_FOR_ZERO: f32 = 10.0;
 #[derive(Clone, Copy, Debug)]
 pub struct Config {
     pub enabled: bool,
@@ -64,6 +69,7 @@ pub enum State {
 pub enum Fault {
     Sensor,
     Deadline,
+    CommandDeadline,
     Tilt,
     Driver,
     Timeout,
@@ -89,6 +95,8 @@ pub enum Reason {
     ReversalDeadTime,
     DirectionConflict,
     PulseComplete,
+    TrajectoryImproving,
+    PulseTarget,
     Fault(Fault),
 }
 #[derive(Clone, Copy)]
@@ -119,6 +127,7 @@ pub struct Trace {
     pub total_on_us: u64,
     pub window: Option<rolling_budget::Snapshot>,
     pub fresh_request_required: bool,
+    pub recovery: Option<recovery::Telemetry>,
     pub requested_pwm: f32,
     pub proposed_pwm: f32,
     pub approved_pwm: Option<f32>,
@@ -148,6 +157,8 @@ pub struct Assist {
     proposed_pwm: f32,
     proposed_assist: bool,
     rolling: Option<rolling_budget::Ledger>,
+    recovery: Option<recovery::Recovery>,
+    short_recovery_zero: bool,
     blocked_demand: Option<i16>,
     last_demand: i16,
 }
@@ -177,6 +188,8 @@ impl Assist {
             proposed_pwm: 0.0,
             proposed_assist: false,
             rolling: None,
+            recovery: None,
+            short_recovery_zero: false,
             blocked_demand: None,
             last_demand: 0,
         }
@@ -186,6 +199,16 @@ impl Assist {
         policy.rolling = Some(rolling_budget::Ledger::new());
         policy
     }
+    pub fn enable_recovery(&mut self) {
+        if self.rolling.is_some() && self.recovery.is_none() {
+            self.recovery = Some(recovery::Recovery::new());
+        }
+    }
+    pub fn enable_short_recovery_zero(&mut self) {
+        if self.rolling.is_some() && self.recovery.is_some() {
+            self.short_recovery_zero = true;
+        }
+    }
     fn signed_assist_duty(&self, sign: i16) -> f32 {
         // Robot motion: positive is forward; only rolling backward assist is reduced.
         let duty = if self.rolling.is_some() && sign < 0 {
@@ -194,6 +217,22 @@ impl Assist {
             self.config.duty
         };
         f32::from(sign) * duty
+    }
+    // 30ms next decision + a checked 20ms update/driver completion reserve.
+    pub fn io_limit_us(&self) -> u64 {
+        if self.recovery.is_some() {
+            RECOVERY_IO_LIMIT_US
+        } else {
+            settings::MAX_LOOP_GAP_US
+        }
+    }
+    fn ordinary_pwm(&self, i: Input) -> f32 {
+        if self.recovery.is_some() && i.pitch * f32::from(i.limited_pd.signum()) > 0.0 {
+            let outward = i.rate * f32::from(i.limited_pd.signum());
+            i.mapped_pwm * (1.0 + outward.min(0.0) / INWARD_RATE_FOR_ZERO).clamp(0.0, 1.0)
+        } else {
+            i.mapped_pwm
+        }
     }
     fn usage(&self, now: u64) -> (u8, u64) {
         self.rolling
@@ -232,6 +271,11 @@ impl Assist {
         }
     }
     fn propose(&mut self, now: u64, pwm: f32, assist: bool, reason: Option<Reason>) -> Trace {
+        if matches!(reason, Some(Reason::Fault(_)))
+            && let Some(r) = self.recovery.as_mut()
+        {
+            r.finish(recovery::Reason::Fault);
+        }
         self.proposed_pwm = pwm;
         self.proposed_assist = assist;
         self.reason = reason;
@@ -269,7 +313,7 @@ impl Assist {
             || i.limited_pd.unsigned_abs() > settings::PD_OUTPUT_LIMIT as u16
         {
             self.fault.get_or_insert(Fault::InvalidInput);
-        } else if i.pitch.abs() >= crate::balance::FALL_ANGLE_DEG {
+        } else if i.pitch.abs() >= crate::balance::CONTROL_FALL_ANGLE_DEG {
             self.fault.get_or_insert(Fault::Tilt);
         }
         if i.sample_us > i.now_us
@@ -308,6 +352,47 @@ impl Assist {
                 Some(Reason::Fault(Fault::InvalidInput)),
             );
         }
+        let resources = !self.exhausted(i.now_us) && i.now_us >= self.cooldown_end;
+        let ordinary =
+            !self.assisting && self.command != 0.0 && (self.command as i16).signum() == sign;
+        // Only qualified recovery may use this value; initial startup keeps config.zero_us.
+        // last_direction records an accepted signed robot-motion command, NOT wheel speed.
+        let recovery_zero_us =
+            if self.short_recovery_zero && sign != 0 && self.last_direction == sign {
+                0
+            } else {
+                self.config.zero_us
+            };
+        let decision = if let Some(r) = self.recovery.as_mut() {
+            r.update(
+                i,
+                fresh,
+                resources,
+                ordinary,
+                self.pulses > 0,
+                self.zero_since,
+                recovery_zero_us,
+                self.config.candidate_us,
+                self.config.pulse_us,
+            )
+        } else {
+            recovery::Decision::Ordinary
+        };
+        let ordinary_pwm = self.ordinary_pwm(i);
+        if decision == recovery::Decision::Probe {
+            let duty = (i.mapped_pwm.abs() + recovery::PROBE_INCREMENT)
+                .min(settings::MAPPING.maximum_duty);
+            return self.propose(i.now_us, f32::from(sign) * duty, false, None);
+        }
+        if decision == recovery::Decision::Zero {
+            self.requested = true;
+            self.requested_pwm = self.signed_assist_duty(sign);
+            self.candidate = None;
+            return self.propose(i.now_us, 0.0, false, Some(Reason::ZeroInterval));
+        }
+        if decision == recovery::Decision::Cancel {
+            self.candidate = None;
+        }
         self.requested =
             !neutral && (self.zero_since.is_some() || self.candidate.is_some() || self.assisting);
         self.requested_pwm = if self.requested {
@@ -344,6 +429,20 @@ impl Assist {
             self.state = self.resting_state(i.now_us);
             return self.propose(i.now_us, 0.0, false, Some(reason));
         }
+        if self.recovery.is_some()
+            && i.pitch * f32::from(sign) > 0.0
+            && i.rate * f32::from(sign) < recovery::IMPROVING_RATE
+        {
+            return self.propose(
+                i.now_us,
+                ordinary_pwm,
+                false,
+                Some(Reason::TrajectoryImproving),
+            );
+        }
+        if decision == recovery::Decision::Cancel {
+            return self.propose(i.now_us, ordinary_pwm, false, None);
+        }
         if self.assisting {
             let elapsed = self.pulse_start.map_or(0, |t| i.now_us.saturating_sub(t));
             // Reserve scheduling AND command-acknowledgement time. Otherwise
@@ -353,17 +452,28 @@ impl Assist {
                 .pulse_us
                 .saturating_sub(elapsed)
                 .min(self.config.total_us.saturating_sub(self.usage(i.now_us).1));
-            if remaining > STOP_RESERVE_US {
+            let reserve = if self.recovery.is_some() {
+                settings::MAX_LOOP_GAP_US + self.io_limit_us()
+            } else {
+                STOP_RESERVE_US
+            };
+            let target = self.recovery.is_none() || elapsed < TARGET_PULSE_US;
+            if target && remaining > reserve {
                 self.state = State::AssistActive;
                 self.eligible = true;
                 return self.propose(i.now_us, self.signed_assist_duty(sign), true, None);
             }
             self.state = self.resting_state(i.now_us);
-            return self.propose(i.now_us, i.mapped_pwm, false, Some(Reason::PulseComplete));
+            let reason = if self.recovery.is_some() && elapsed >= TARGET_PULSE_US {
+                Reason::PulseTarget
+            } else {
+                Reason::PulseComplete
+            };
+            return self.propose(i.now_us, ordinary_pwm, false, Some(reason));
         }
         self.state = self.resting_state(i.now_us);
         if !self.config.enabled {
-            return self.propose(i.now_us, i.mapped_pwm, false, Some(Reason::Disabled));
+            return self.propose(i.now_us, ordinary_pwm, false, Some(Reason::Disabled));
         }
         if self.exhausted(i.now_us) {
             let reason = if self.rolling.is_some() {
@@ -377,28 +487,36 @@ impl Assist {
             } else {
                 Reason::Budget
             };
-            return self.propose(i.now_us, i.mapped_pwm, false, Some(reason));
+            return self.propose(i.now_us, ordinary_pwm, false, Some(reason));
         }
         if i.now_us < self.cooldown_end {
             if self.rolling.is_some() {
                 self.blocked_demand = Some(sign);
                 self.candidate = None;
             }
-            return self.propose(i.now_us, i.mapped_pwm, false, Some(Reason::Cooldown));
+            return self.propose(i.now_us, ordinary_pwm, false, Some(Reason::Cooldown));
         }
-        if self.rolling.is_some() && self.blocked_demand == Some(sign) {
+        if self.rolling.is_some()
+            && self.blocked_demand == Some(sign)
+            && decision != recovery::Decision::Permit
+        {
             return self.propose(
                 i.now_us,
-                i.mapped_pwm,
+                ordinary_pwm,
                 false,
                 Some(Reason::FreshRequestRequired),
             );
         }
+        let required_zero_us = if decision == recovery::Decision::Permit {
+            recovery_zero_us
+        } else {
+            self.config.zero_us
+        };
         if self
             .zero_since
-            .is_none_or(|t| i.now_us.saturating_sub(t) < self.config.zero_us)
+            .is_none_or(|t| i.now_us.saturating_sub(t) < required_zero_us)
         {
-            return self.propose(i.now_us, i.mapped_pwm, false, Some(Reason::ZeroInterval));
+            return self.propose(i.now_us, ordinary_pwm, false, Some(Reason::ZeroInterval));
         }
         if !fresh {
             return self.propose(i.now_us, 0.0, false, Some(Reason::NoFreshDemand));
@@ -420,9 +538,13 @@ impl Assist {
         self.advance(now);
         if self
             .last_update
-            .is_some_and(|t| now.saturating_sub(t) > settings::MAX_LOOP_GAP_US)
+            .is_some_and(|t| now.saturating_sub(t) > self.io_limit_us())
         {
-            self.fault.get_or_insert(Fault::Deadline);
+            self.fault.get_or_insert(if self.recovery.is_some() {
+                Fault::CommandDeadline
+            } else {
+                Fault::Deadline
+            });
         }
         if !pwm.is_finite()
             || (pwm != 0.0 && (pwm != f32::from(self.proposed_pwm as i16) || self.fault.is_some()))
@@ -449,6 +571,9 @@ impl Assist {
             self.last_pulse_us = self.pulse_start.map_or(0, |t| now.saturating_sub(t));
             self.pulse_start = None;
             self.cooldown_end = now.saturating_add(self.config.cooldown_us);
+        }
+        if let Some(r) = self.recovery.as_mut() {
+            r.acknowledge(assisted);
         }
         self.command = pwm;
         self.assisting = assisted; // Acknowledged output remains a fact even after a fault.
@@ -478,6 +603,9 @@ impl Assist {
     pub fn stop(&mut self, now: u64, fault: Fault) {
         self.advance(now);
         self.fault.get_or_insert(fault);
+        if let Some(r) = self.recovery.as_mut() {
+            r.finish(recovery::Reason::Fault);
+        }
         self.state = State::Disarmed;
         self.candidate = None;
         self.eligible = false;
@@ -501,6 +629,7 @@ impl Assist {
             total_on_us: self.on_us,
             window: self.rolling.as_ref().map(|ledger| ledger.snapshot(now)),
             fresh_request_required: self.blocked_demand.is_some(),
+            recovery: self.recovery.as_ref().map(|r| r.telemetry),
             requested_pwm: self.requested_pwm,
             proposed_pwm: self.proposed_pwm,
             approved_pwm: None,

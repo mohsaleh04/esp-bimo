@@ -260,7 +260,7 @@ mod tests {
             r.step(530_000, 4.0, 0.0);
             match case {
                 0 => {
-                    r.step(540_000, 15.0, 0.0);
+                    r.step(540_000, 21.0, 0.0);
                 }
                 1 => {
                     r.step(540_000, f32::NAN, 0.0);
@@ -383,13 +383,13 @@ mod tests {
             let mut r = Replay::new();
             r.ready();
             r.step(530_000, 4.0 * sign, 0.0);
-            r.step(540_000, 15.0 * sign, 0.0);
+            r.step(540_000, 21.0 * sign, 0.0);
             assert_eq!(
                 r.response.disarm_reason,
                 Some(policy::DisarmReason::Fault(balance::Fault::Tilt))
             );
             assert_eq!(r.motors.outputs, (0, 0));
-            assert_eq!(r.metrics.max_abs_pitch, 15.0);
+            assert_eq!(r.metrics.max_abs_pitch, 21.0);
         }
     }
 }
@@ -692,7 +692,7 @@ mod restart_tests {
         for sign in [-1.0, 1.0] {
             let mut r = AssistReplay::new(enabled());
             start(&mut r, sign);
-            let t = r.step(15.0 * sign, 0.0, None);
+            let t = r.step(21.0 * sign, 0.0, None);
             assert_eq!(t.state, State::Disarmed);
             assert_eq!(r.base.motors.outputs, (0, 0));
         }
@@ -1009,7 +1009,7 @@ mod arbiter_tests {
             let mut s = Trial::new(true);
             s.initial(1.0);
             match case {
-                0 => s.step_at(s.t + 10_000, 15.0, 0.0),
+                0 => s.step_at(s.t + 10_000, 21.0, 0.0),
                 1 => s.step_at(s.t + 30_001, 3.0, 0.0),
                 2 => {
                     s.r.sensor_fail(policy::SensorFault::I2cRead);
@@ -1378,3 +1378,7 @@ fn run_output_replay(selected: output::AssistPolicy) {
 #[cfg(test)]
 #[path = "rolling_assist.rs"]
 mod rolling_tests;
+
+#[cfg(test)]
+#[path = "recovery_assist.rs"]
+mod recovery_tests;

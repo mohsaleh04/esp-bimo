@@ -21,7 +21,13 @@ impl AssistPolicy {
         match self {
             Self::Legacy => "legacy: one Kick",
             Self::Fixed => "Restart Assist: two total pulses",
-            Self::Rolling => "Rolling Restart Assist: two pulses per 1.5 seconds",
+            Self::Rolling => {
+                if cfg!(feature = "balance-control-recovery-assist") {
+                    "Rolling Restart Assist: two pulses per 1.5 seconds; experimental pre-cutoff recovery ENABLED"
+                } else {
+                    "Rolling Restart Assist: two pulses per 1.5 seconds"
+                }
+            }
         }
     }
 }
@@ -66,6 +72,18 @@ impl MotorOutput {
             AssistPolicy::Fixed | AssistPolicy::Rolling => {
                 Self::Restart(RestartOutput::new(policy))
             }
+        }
+    }
+    #[cfg(test)] // Host injection only; firmware selection is exclusively Cargo gated.
+    pub fn enable_recovery(&mut self) {
+        if let Self::Restart(r) = self {
+            r.assist.enable_recovery();
+        }
+    }
+    #[cfg(test)]
+    pub fn enable_short_recovery_zero(&mut self) {
+        if let Self::Restart(r) = self {
+            r.assist.enable_short_recovery_zero();
         }
     }
     pub fn confirm_zero(&mut self, m: &mut impl DualMotor, mut clock: impl FnMut() -> u64) {
@@ -178,7 +196,7 @@ pub struct RestartOutput {
 }
 impl RestartOutput {
     fn new(policy: AssistPolicy) -> Self {
-        let assist = if policy == AssistPolicy::Rolling {
+        let mut assist = if policy == AssistPolicy::Rolling {
             Assist::new_rolling(Config {
                 enabled: true,
                 ..Config::rolling_defaults()
@@ -189,6 +207,12 @@ impl RestartOutput {
                 ..Default::default()
             })
         };
+        if policy == AssistPolicy::Rolling && cfg!(feature = "balance-control-recovery-assist") {
+            assist.enable_recovery();
+            if cfg!(feature = "balance-control-short-recovery-zero") {
+                assist.enable_short_recovery_zero();
+            }
+        }
         Self {
             assist,
             zero: Default::default(),
@@ -203,7 +227,8 @@ impl RestartOutput {
     }
     fn record(&mut self, t: Trace) {
         let changed = self.last_record.is_none_or(|p| {
-            p.state != t.state
+            p.recovery != t.recovery
+                || p.state != t.state
                 || p.requested != t.requested
                 || p.eligible != t.eligible
                 || p.applied != t.applied
@@ -244,7 +269,7 @@ impl RestartOutput {
         m.disarm();
         if !r.finished {
             r.abort(match fault {
-                Fault::Deadline | Fault::Clock => balance::Fault::Timing,
+                Fault::Deadline | Fault::CommandDeadline | Fault::Clock => balance::Fault::Timing,
                 Fault::Tilt => balance::Fault::Tilt,
                 Fault::Sensor => balance::Fault::Invalid,
                 _ => balance::Fault::Motor,
@@ -367,6 +392,15 @@ impl RestartOutput {
                 return Ok(());
             }
             let done = clock();
+            if done < gate_time || done.saturating_sub(gate_time) > self.assist.io_limit_us() {
+                let fault = if self.assist.io_limit_us() < settings::MAX_LOOP_GAP_US {
+                    Fault::CommandDeadline
+                } else {
+                    Fault::Deadline
+                };
+                self.fail(m, r, clock, fault);
+                return Err(Disarmed);
+            }
             self.zero.acknowledge(approved as i16, done);
             let mut ack = self
                 .assist

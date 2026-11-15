@@ -64,7 +64,7 @@ struct Record {
     accel_age_us: Option<u64>,
     accel_rejection: Option<AccelRejection>,
 }
-fn log_record(r: Record) {
+fn log_record(r: Record, tilt_limit: f32) {
     let ready = r.ready;
     let pd = r.limited_pd;
     let state = r.state;
@@ -76,7 +76,7 @@ fn log_record(r: Record) {
         .output
         .map_or((0, 0), |o| wheel_commands(o.preview.final_pwm as i16));
     info!(
-        "state={state:?} neutral={neutral} accel_used={} correction_age_us={:?} accel_rejection={:?} FRESH age={}us dt={}us poll_wait={} loop={}us max_loop={}us work={}us missed={} pitch={:.2} rate={:.2} ready={ready} live_tilt_ok={} PD={pd:?} PWM={mapped:?} kick={kick}/{elapsed:?}ms calc_A/LEFT={} B/RIGHT={}; motors OFF",
+        "state={state:?} neutral={neutral} accel_used={} correction_age_us={:?} accel_rejection={:?} FRESH age={}us dt={}us poll_wait={} loop={}us max_loop={}us work={}us missed={} pitch={:.2} rate={:.2} ready={ready} live_tilt_ok={} tilt_cutoff_deg={tilt_limit} PD={pd:?} PWM={mapped:?} kick={kick}/{elapsed:?}ms calc_A/LEFT={} B/RIGHT={}; motors OFF",
         r.accel_used,
         r.accel_age_us,
         r.accel_rejection,
@@ -89,7 +89,7 @@ fn log_record(r: Record) {
         r.missed,
         r.pitch,
         r.rate,
-        r.pitch.abs() < balance::FALL_ANGLE_DEG,
+        r.pitch.abs() < tilt_limit,
         commands.0,
         commands.1
     );
@@ -254,6 +254,11 @@ async fn run_profile(
         }
     };
     if continuous {
+        info!(
+            "CONTROL tilt cutoff=+/-{}deg; recovery projected limit={}deg",
+            response.control.tilt_limit(),
+            balance::CONTROL_FALL_ANGLE_DEG - restart_assist::recovery::CUTOFF_MARGIN
+        );
         info!(
             "CONTROL STATE {}",
             control_profile::Stage::Calibrating.label()
@@ -519,16 +524,19 @@ async fn run_profile(
                 Some(DisarmReason::Fault(Fault::Stale)) => {
                     "last valid estimate exceeded 40ms freshness limit"
                 }
-                Some(DisarmReason::Fault(Fault::Tilt)) => "pitch reached/exceeded 15deg cutoff",
+                Some(DisarmReason::Fault(Fault::Tilt)) => {
+                    "pitch reached/exceeded configured tilt cutoff"
+                }
                 _ => issue,
             };
             warn!(
-                "DISARM: response_state={:?} reason={:?} controller={:?}; sensor_fault={:?} correction_age_us={:?} accel_rejection={last_accel_rejection:?} bus_error={last_bus_error:?} dropped_records={dropped_records}; detail={detail}; sample_age_us={age:?}; loop_us={} work_us={} max_loop_us={} max_work_us={} missed_deadlines={}; final A/LEFT=0 B/RIGHT=0; reset required; buffered telemetry follows.",
+                "DISARM: response_state={:?} reason={:?} controller={:?}; sensor_fault={:?} correction_age_us={:?} accel_rejection={last_accel_rejection:?} bus_error={last_bus_error:?} dropped_records={dropped_records}; detail={detail}; tilt_cutoff_deg={}; sample_age_us={age:?}; loop_us={} work_us={} max_loop_us={} max_work_us={} missed_deadlines={}; final A/LEFT=0 B/RIGHT=0; reset required; buffered telemetry follows.",
                 response.state(),
                 response.disarm_reason,
                 response.control.state(),
                 response.sensor_fault,
                 response.accel_correction_age_us,
+                response.control.tilt_limit(),
                 timing.interval_us,
                 timing.work_us,
                 timing.max_interval_us,
@@ -536,7 +544,7 @@ async fn run_profile(
                 timing.missed_deadlines
             );
             for r in records[..record_count].iter().flatten() {
-                log_record(*r);
+                log_record(*r, response.control.tilt_limit());
             }
             loop {
                 Timer::after_secs(1).await;
@@ -957,7 +965,7 @@ async fn run_profile(
                 if config.ground {
                     log_ground_record(r, ground_timing.max_summary_us);
                 } else {
-                    log_record(r);
+                    log_record(r, response.control.tilt_limit());
                 }
             } else if config.ground {
                 info!(
