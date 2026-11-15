@@ -110,7 +110,7 @@ new deterioration, no periodic retries, acknowledgement reserve, pulse jitter,
 shared ledger and the unchanged cutoff/fault/timeout/zero-output paths. These are
 synthetic software tests, not a physical dynamics prediction.
 
-The +/-21deg permanent fault, 18deg recovery projection screen, 30-second ACTIVE
+The +/-21deg permanent fault, 18deg recovery projection screen, 90-second ACTIVE
 window, 100 ms reversal neutral time, sensor validity/correction age, watchdog,
 motor polarity, hardware and all LIVE gates remain unchanged. Before any separately
 authorized physically restrained trial, review deferred logs and verify motor supply/
@@ -144,7 +144,7 @@ ms after acknowledgement, followed by the normal demand qualification as applica
 Rapid changes cannot qualify a pulse every update. Neutral, improvement, stale or
 invalid evidence, budget/cooldown loss and faults retain existing cancellation and
 permanent-disarm behavior. Budgets, dwell, the 100 ms target/150 ms maximum pulse,
-70/65% duties, 21-degree fault, 18-degree margin, and 30-second session remain intact.
+70/65% duties, 21-degree fault, 18-degree margin, and 90-second session remain intact.
 
 Projection uses the actual recovery zero-wait requirement: the optional same-
 direction path subtracts 100 ms from the former horizon (530→430 ms with a useful

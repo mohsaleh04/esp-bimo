@@ -4,8 +4,8 @@ use crate::pwm_mapping::{Config, KickConfig, KickState, Preview};
 
 // ACTIVE only. Fresh gyro samples still have their separate <=40ms deadline.
 pub const MAX_GYRO_ONLY_US: u64 = 50_000;
-// Local to this diagnostic; shared balance controller retains its 2-second cap.
-pub const MAX_RESPONSE_WINDOW_US: u64 = 30_000_000;
+// Constructor ceiling also accommodates balance-control; other profiles keep their configured windows.
+pub const MAX_RESPONSE_WINDOW_US: u64 = 90_000_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SensorFault {
     I2cRead,

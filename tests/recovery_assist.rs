@@ -344,7 +344,7 @@ fn integrated_faults_during_zero_or_pulse_permanently_stop_real_interface() {
             }
             if condition == 4 {
                 // Exact existing ACTIVE end; tick must terminate before a driver command.
-                s.r.tick(30_520_000);
+                s.r.tick(520_000 + control_profile::ACTIVE_US);
             }
             s.at(
                 t,

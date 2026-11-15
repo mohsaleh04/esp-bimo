@@ -432,10 +432,10 @@ fn rolling_faults_tilt_and_deadline_remain_permanent_after_credit_recovers() {
     }
 }
 #[test]
-fn rolling_session_still_expires_at_30_seconds_without_automatic_rearming() {
+fn rolling_session_still_expires_at_90_seconds_without_automatic_rearming() {
     let mut s = Trial::new();
     let end = 520_000 + control_profile::ACTIVE_US;
-    assert_eq!(control_profile::ACTIVE_US, 30_000_000);
+    assert_eq!(control_profile::ACTIVE_US, 90_000_000);
     while s.now < end {
         s.step(0.0);
     }

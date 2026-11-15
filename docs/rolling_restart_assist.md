@@ -2,7 +2,7 @@
 
 This selectable balance-control policy is disabled for LIVE. It uses the same output
 arbiter, acknowledged-zero reversal guard, sensor checks and permanent disarm path.
-It changes neither PD gains nor ordinary PWM mapping. ACTIVE remains 30 seconds.
+It changes neither PD gains nor ordinary PWM mapping. ACTIVE remains 90 seconds.
 The fixed lifetime two-pulse policy remains selectable with
 `balance-control-restart-assist`.
 

@@ -218,8 +218,13 @@ async fn run_profile(
     if !live {
         warn!("Movement disabled by diagnostic-specific feature/source gates; DRY only.");
     }
-    if config.ground && !ground::window_valid(window_us) {
-        warn!("GROUND BLOCKED: window must be >0 and <=1 second; motors disarmed.");
+    let valid_window = if continuous {
+        window_us == control_profile::ACTIVE_US
+    } else {
+        ground::window_valid(window_us)
+    };
+    if config.ground && !valid_window {
+        warn!("GROUND BLOCKED: invalid configured ACTIVE window ({window_us}us); motors disarmed.");
         loop {
             Timer::after_secs(1).await;
         }

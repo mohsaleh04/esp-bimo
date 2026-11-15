@@ -14,7 +14,7 @@ const SUPPLY_LIMITS_VERIFIED: bool = true;
 const SENSOR_FAULT_REVIEWED: bool = true;
 const RESTART_ASSIST_REVIEWED: bool = true;
 const ROLLING_ASSIST_REVIEWED: bool = true;
-const WINDOW_US: u64 = 30_000_000;
+const WINDOW_US: u64 = 90_000_000;
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) -> ! {
     let selection = runtime::output::select_policy(

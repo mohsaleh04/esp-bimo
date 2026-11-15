@@ -688,7 +688,7 @@ mod restart_tests {
         assert_eq!(r.base.timing.missed_deadlines, 1);
     }
     #[test]
-    fn tilt_cutoff_and_current_30_second_timeout_still_disarm() {
+    fn tilt_cutoff_and_current_90_second_timeout_still_disarm() {
         for sign in [-1.0, 1.0] {
             let mut r = AssistReplay::new(enabled());
             start(&mut r, sign);
@@ -1114,11 +1114,11 @@ mod arbiter_tests {
         assert_eq!(s.m.motor.outputs, (0, 0));
     }
     #[test]
-    fn integrated_timeout_remains_thirty_seconds_and_is_terminal_during_deadtime() {
+    fn integrated_timeout_remains_ninety_seconds_and_is_terminal_during_deadtime() {
         let mut s = Trial::new(true);
         s.initial(1.0);
         let deadline = 520_000 + control_profile::ACTIVE_US;
-        assert_eq!(control_profile::ACTIVE_US, 30_000_000);
+        assert_eq!(control_profile::ACTIVE_US, 90_000_000);
         while s.t < deadline - 30_000 {
             s.step(3.0);
         }
@@ -1295,7 +1295,11 @@ fn run_output_replay(selected: output::AssistPolicy) {
     g.confirm_zero(&mut m, || 0);
     let mut timing = policy::LoopTiming::default();
     let rolling = selected == output::AssistPolicy::Rolling;
-    let stop_at = if rolling { 30_520_000 } else { 5_000_000 };
+    let stop_at = if rolling {
+        520_000 + control_profile::ACTIVE_US
+    } else {
+        5_000_000
+    };
     let mut now = 0;
     for t in (0..=stop_at).step_by(10_000) {
         now = t;
@@ -1382,3 +1386,60 @@ mod rolling_tests;
 #[cfg(test)]
 #[path = "recovery_assist.rs"]
 mod recovery_tests;
+
+#[test]
+fn ninety_second_active_window_starts_only_on_fresh_neutral_acceptance() {
+    let mut r = control_profile::response(true).unwrap();
+    for t in (0..=2_000_000).step_by(10_000) {
+        r.sample(3.0, 0.0, true, 0.01, t);
+        assert_ne!(r.state(), ResponseState::Active);
+        assert!(!r.finished);
+    }
+    assert_eq!(r.state(), ResponseState::ArmedWaitingForNeutral);
+    let start = 2_010_000;
+    assert!(r.sample(0.0, 0.0, true, 0.01, start).is_none());
+    assert_eq!(r.state(), ResponseState::Active);
+    for t in ((start + 10_000)..(start + control_profile::ACTIVE_US)).step_by(10_000) {
+        r.sample(0.0, 0.0, true, 0.01, t);
+        assert_eq!(r.state(), ResponseState::Active);
+        assert!(!r.finished);
+    }
+    r.sample(0.0, 0.0, true, 0.01, start + control_profile::ACTIVE_US);
+    assert_eq!(r.disarm_reason, Some(policy::DisarmReason::ActiveTimeout));
+    assert!(r.finished);
+}
+
+#[test]
+fn ninety_second_telemetry_saturation_keeps_order_and_pinned_terminal_context() {
+    #[path = "../src/bin/motor_response_runtime/capture.rs"]
+    mod periodic_capture;
+    let mut capture = periodic_capture::Capture::<u64, 64>::new();
+    let mut log = restart_assist::Recorder::<64>::new();
+    let a = restart_assist::Assist::new(restart_assist::Config::default());
+    for t in (0..=control_profile::ACTIVE_US).step_by(1_000) {
+        capture.record(t, t);
+        let mut record = a.status(t);
+        record.applied = t == 1_000 || t == 89_999_000;
+        record.state = if t == control_profile::ACTIVE_US {
+            restart_assist::State::Disarmed
+        } else if record.applied {
+            restart_assist::State::AssistActive
+        } else {
+            restart_assist::State::Idle
+        };
+        log.record(record);
+    }
+    assert_eq!(capture.recent().count(), 64);
+    assert_eq!(capture.recent().next(), Some(83_700_000));
+    assert_eq!(capture.recent().last(), Some(90_000_000));
+    assert_eq!(capture.overwritten, 901 - 64);
+    assert_eq!(log.recent().count(), 64);
+    assert_eq!(log.overwritten, 90_001 - 64);
+    assert_eq!(log.first_applied.unwrap().us, 1_000);
+    assert_eq!(log.last_applied.unwrap().us, 89_999_000);
+    assert_eq!(log.terminal.unwrap().us, 90_000_000);
+    assert_eq!(
+        log.recent().last().unwrap().state,
+        restart_assist::State::Disarmed
+    );
+}

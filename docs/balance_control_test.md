@@ -1,7 +1,7 @@
 # Experimental bounded continuous bidirectional balance-control profile
 
 `balance-control-test` is a NEW, separate firmware profile. It continuously
-recalculates corrections on fresh BMI160 estimates during a **maximum 30-second
+recalculates corrections on fresh BMI160 estimates during a **maximum 90-second
 ACTIVE experiment**. It does not provide unlimited running or autonomous,
 unrestrained balancing. Independent mechanical restraint and a motor-power
 cutoff remain mandatory. No gains have been tuned by this software change.
@@ -24,7 +24,7 @@ States logged with `CONTROL STATE`:
    within ±5° and ±5°/s. No output or implicit startup pulse.
 4. `ARMED_WAITING_FOR_NEUTRAL`: still physically disarmed; a NEW fresh neutral
    sample (|limited PD|≤2) AND current readiness must be accepted.
-5. `ACTIVE`: only now can the final motor gate pass commands. The configured 30-second
+5. `ACTIVE`: only now can the final motor gate pass commands. The configured 90-second
    timer starts on neutral acceptance; that sample still commands zero. Later
    meaningful requests can receive the initial Kick.
 6. `DISARMED`: actual driver shutdown and terminal latch; reset required.
@@ -54,7 +54,7 @@ are printed AFTER motor shutdown, never as blocking logs in the powered loop.
   clipped/nonfinite gyro, invalid estimates, I2C and driver errors disarm.
 - New-profile sensor/timing faults also permanently latch during readiness.
   Calibration failures remain disarmed and require reset. The existing ten-second
-  combined readiness/neutral timeout and developer-selected 30-second ACTIVE timeout remain.
+  combined readiness/neutral timeout and developer-selected 90-second ACTIVE timeout remain.
 - No automatic rearming; no balancing without restraint; no minimum-duty boost
   beyond the existing explicitly configured mapper/Kick behavior.
 
@@ -128,7 +128,7 @@ supply/grounds and heating for the 6V motors. Duty percentage is not a voltage o
 current guarantee. Complete DRY and inspect sign, sensor acceptance and deadlines.
 Use the preparation interval to secure the fixture. Hold upright/neutral; once
 ACTIVE begins, only permit small supported displacements. A first powered trial
-is bounded by the developer-selected 30-second timeout. Accept only correct polarity, the selected mode's pulse budget (one legacy Kick or two total integrated assists), ≥100ms
+is bounded by the developer-selected 90-second timeout. Accept only correct polarity, the selected mode's pulse budget (one legacy Kick or two total integrated assists), ≥100ms
 acknowledged-zero intervals before opposite output, zero missed deadlines and
 terminal physical zero/disarm. Cut power for wrong direction, violent/chattering
 motion, restraint loading, stall/heating/current excursion or absent shutdown.
@@ -189,10 +189,10 @@ See [integrated output arbitration](output_arbitration.md) and
 [Restart Assist policy limits](restart_assist.md). The host replay can exercise
 the same authoritative arbiter without hardware. The firmware integration is
 behind its own feature/source gate; all five source gates are false. The
-30-second ACTIVE window is unchanged. The default mode remains legacy one-Kick.
+90-second ACTIVE window is unchanged. The default mode remains legacy one-Kick.
 
 For the separately gated, default-disabled recurring budget experiment, see
-[Rolling Restart Assist](rolling_restart_assist.md). It preserves the 30-second
+[Rolling Restart Assist](rolling_restart_assist.md). It preserves the 90-second
 ACTIVE window and all existing output/sensor interlocks.
 
 The balance-control cutoff is explicitly 21 degrees (inclusive). Older standalone,
@@ -200,3 +200,28 @@ suspended-wheel and ground-response profiles retain their 15-degree default. The
 recovery projected limit is derived as 21 minus the existing 3-degree margin,
 yielding 18 degrees; its minimum-angle eligibility and all other parameters remain
 unchanged. The linear projection is not a guarantee of future physical tilt.
+
+## 90-second ACTIVE limit and bounded retention
+
+The LIVE ACTIVE countdown is now 90,000,000 us and still begins only on acceptance
+of a fresh post-readiness neutral sample. Calibration, 30-second preparation,
+500 ms readiness dwell and 10-second arming timeout are unchanged. Runtime window
+validation accepts this balance-control configuration; older ground-response
+window validation/configurations remain unchanged. The shared response constructor
+ceiling accommodates 90 seconds, but other binaries' configured windows are not
+extended.
+
+Telemetry capacity is intentionally unchanged: 64 periodic snapshots at a 100 ms
+period retain roughly the last 6.4 seconds, the arbiter retains its most recent 64
+transition records, and the event recorder retains its recent 32 events and pinned
+context. Pinned first/last applied and terminal records and run-wide counters remain
+available. Older samples/intermediate events can be overwritten; overflow counters
+report this. **The full 90-second sample/event history is NOT retained.** No claim
+of a complete trajectory or every Kick's context can be made from the final dump.
+
+A 90-second saturation regression checks chronological iteration, overwrite counts,
+and retained first/last applied plus terminal context. Storage remains fixed,
+without allocation growth or blocking serial output in control. After actual motor
+shutdown, the same bounded buffers are dumped; longer ACTIVE time does not add
+unbounded final-dump work. Full-history capture would require a separately designed
+storage/export solution and is not part of this duration-only change.

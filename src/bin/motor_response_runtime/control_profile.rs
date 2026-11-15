@@ -5,7 +5,7 @@ use super::{
     settings,
 };
 use crate::{balance, motors::DualMotor};
-pub const ACTIVE_US: u64 = 30_000_000;
+pub const ACTIVE_US: u64 = 90_000_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Calibrating,

@@ -29,7 +29,7 @@ Two pulses permit investigating one restart after one initial assist, while
 limiting repetition substantially. The 1s cooldown limits rapid retriggering and
 allows observations between attempts. These bounds do not establish safe motor
 voltage/current/temperature or torque. The assist budget does not limit ordinary
-PWM stall current or total motor energy across the 30-second session. The model's two-pulse budget counts its
+PWM stall current or total motor energy across the 90-second session. The model's two-pulse budget counts its
 initial pulse: it does NOT mean an existing initial Kick PLUS two more assists.
 
 To enforce duration bounds with variable control timing, the proposal ends early:
@@ -113,7 +113,7 @@ and negative stop/start demands, exhausts the pulse budget, then permanently
 stops. Formatting happens AFTER the replay. It is signal/policy replay, not a
 motor/pendulum/thermal model. Tests also cover chatter, true acknowledgement
 ordering, stale/fault data, cooldown, cumulative budget, tilt, deadline shutdown,
-the current 30-second timeout and inability to rearm automatically.
+the current 90-second timeout and inability to rearm automatically.
 
 ## Interaction and remaining review blockers
 

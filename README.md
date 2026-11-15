@@ -924,10 +924,10 @@ The ACTIVE window remains 1s. This does not enable autonomous balancing.
 
 `balance-control-test` reuses the validated bidirectional control path with
 explicit lifecycle logs, measured behavior statistics and stricter terminal
-fault handling during readiness. Motor-powered ACTIVE remains limited to 1s;
-all four new source gates default false and only `balance-control-live` grants
-feature permission. See [architecture, host replay and restrained test procedure](docs/balance_control_test.md).
+fault handling during readiness. Motor-powered ACTIVE is limited to 90s after
+neutral acceptance; existing source verification gates and `balance-control-live`
+feature permission remain required. See [architecture, host replay and restrained test procedure](docs/balance_control_test.md).
 
-The optional `balance-control-restart-assist` feature also requires the false-by-default
+The optional `balance-control-restart-assist` feature also requires the existing
 `RESTART_ASSIST_REVIEWED` source gate. See [integrated output arbitration](docs/output_arbitration.md);
-the initial pulse and one restart share a single budget, with the 30s window unchanged.
+the initial pulse and one restart share a single budget; balance-control now uses a 90s ACTIVE window.

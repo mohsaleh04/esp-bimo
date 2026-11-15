@@ -126,7 +126,7 @@ All serial formatting/printing remains after permanent physical disarm.
 The same production arbiter runs in offline integration tests with an in-memory
 DualMotor. Tests cover shared initial/restart count, third-pulse suppression,
 post-IO reversal timing, empty polls, cutoff, correction age, fault/driver errors,
-late approvals, 30-second expiry and no rearming. Legacy regression tests retain
+late approvals, 90-second expiry and no rearming. Legacy regression tests retain
 their validated behavior. Offline success is not physical balance validation.
 
 Before a separately authorized restrained run, review actual command/ack timing,
@@ -134,7 +134,7 @@ loaded startup torque, reversal current, supply/thermal limits and a reachable
 independent cutoff. The earlier 150ms candidate may start differently when the
 conservative reserve ends it near 90ms. No wheel-speed/current feedback exists.
 Ordinary PWM may still stall after assist budget exhaustion; the assist budget
-is not a limit on all motor energy over 30 seconds. Keep physical restraint in
+is not a limit on all motor energy over 90 seconds. Keep physical restraint in
 both directions; do not infer autonomous stability or remove any safety gate.
 
 The selectable [rolling budget](rolling_restart_assist.md) uses this same arbiter
