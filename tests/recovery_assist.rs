@@ -1224,3 +1224,155 @@ fn cached_spike_does_not_extend_kick_past_target_or_hide_stale_data() {
         );
     }
 }
+
+// Reported anchors only. Intermediate samples below are SYNTHETIC alternatives,
+// not a reconstruction of the unavailable raw LIVE trace. Seed the confirmed
+// post-pulse AwaitImprovement state to isolate its actual requalification rule.
+const REPORTED_RECOVERY_US: u64 = 28_976_000;
+const REPORTED_RECOVERY_END_US: u64 = REPORTED_RECOVERY_US + 47_500;
+fn reported_post_pulse() -> restart_assist::recovery::Recovery {
+    use restart_assist::recovery::{Reason, Recovery};
+    let mut r = Recovery::new();
+    r.telemetry.attempted = true;
+    r.telemetry.pulse_applied = true;
+    r.finish(Reason::Improving);
+    // Synthetic improvement baseline uses the reported starting angle. The
+    // actual angle at pulse end, and intermediate inward rates, were not supplied.
+    r.update(
+        input(REPORTED_RECOVERY_END_US, 8.89, -1.0),
+        true,
+        false,
+        true,
+        true,
+        None,
+        100_000,
+        20_000,
+        150_000,
+    );
+    r
+}
+#[test]
+fn reported_angle_bounds_do_not_imply_a_200ms_requalification_interval() {
+    use restart_assist::recovery::{Decision, Phase, Reason};
+    for duration in [120_000_u64, 300_000] {
+        let mut r = reported_post_pulse();
+        let samples = duration / 10_000;
+        let rate = -(8.89 - 6.72) / (duration as f32 / 1_000_000.0);
+        let mut rearmed = false;
+        for n in 1..=samples {
+            let t = REPORTED_RECOVERY_END_US + n * 10_000;
+            let angle = 8.89 - (8.89 - 6.72) * n as f32 / samples as f32;
+            let i = input(t, angle, rate);
+            // Resource rejection does not apply while observing improvement.
+            r.update(i, true, false, true, true, None, 100_000, 20_000, 150_000);
+            rearmed |= r.telemetry.reason == Some(Reason::Rearmed);
+            for offset in (1_000..10_000).step_by(1_000) {
+                let mut cached = i;
+                cached.now_us = t + offset;
+                r.update(
+                    cached, false, false, true, true, None, 100_000, 20_000, 150_000,
+                );
+            }
+        }
+        assert_eq!(rearmed, duration == 300_000);
+        let mut qualified = false;
+        for n in 1..=60 {
+            let t = REPORTED_RECOVERY_END_US + duration + n * 10_000;
+            let angle = 6.72 + (12.27 - 6.72) * n as f32 / 60.0;
+            let d = r.update(
+                input(t, angle, 9.25),
+                true,
+                t >= REPORTED_RECOVERY_END_US + 300_000,
+                true,
+                true,
+                None,
+                100_000,
+                20_000,
+                150_000,
+            );
+            qualified |= matches!(d, Decision::Probe | Decision::Zero | Decision::Permit);
+        }
+        if duration == 120_000 {
+            assert_eq!(r.telemetry.phase, Phase::AwaitImprovement);
+            assert!(!qualified);
+        } else {
+            assert!(qualified);
+        }
+    }
+}
+#[test]
+fn requalification_requires_uninterrupted_improvement_not_only_total_angle_drop() {
+    use restart_assist::recovery::{Phase, Reason};
+    for interruption in 0..3 {
+        let mut r = reported_post_pulse();
+        for n in 1..=30 {
+            let mut t = REPORTED_RECOVERY_END_US + n * 10_000;
+            if interruption == 2 && n >= 15 {
+                t += 10_001;
+            }
+            let mut angle = 8.89 - (8.89 - 6.72) * n as f32 / 30.0;
+            let mut rate = -7.2333;
+            if n == 10 || n == 20 {
+                if interruption == 0 {
+                    rate = 0.1;
+                }
+                if interruption == 1 {
+                    angle += 0.08;
+                } // A small fresh uptick resets the existing policy.
+            }
+            r.update(
+                input(t, angle, rate),
+                true,
+                true,
+                true,
+                true,
+                None,
+                100_000,
+                20_000,
+                150_000,
+            );
+            assert_ne!(r.telemetry.reason, Some(Reason::Rearmed));
+        }
+        assert_eq!(r.telemetry.phase, Phase::AwaitImprovement);
+    }
+}
+#[test]
+fn rearmed_same_direction_recovery_can_pass_fresh_request_latch_without_resetting_budget() {
+    use restart_assist::recovery::{Phase, Reason};
+    let mut a = initialized(true);
+    let mut t = 600_000;
+    for n in 0..60 {
+        t += 10_000;
+        step(&mut a, t, 6.0 + n as f32 * 0.05, 5.0);
+    }
+    assert_eq!(a.pulses_applied(), 2);
+    for _ in 0..60 {
+        t += 10_000;
+        step(&mut a, t, 8.89, 1.0);
+    }
+    assert!(a.status(t).fresh_request_required);
+    assert_eq!(a.status(t).pulses_remaining, 1);
+    let mut saw_rearmed = false;
+    for n in 1..=30 {
+        t += 10_000;
+        let o = step(&mut a, t, 8.89 - (8.89 - 6.72) * n as f32 / 30.0, -7.2333);
+        saw_rearmed |= o.recovery.unwrap().reason == Some(Reason::Rearmed);
+    }
+    assert!(saw_rearmed);
+    assert!(a.status(t).fresh_request_required); // Requalification does not clear/reset the latch.
+    assert_ne!(a.status(t).recovery.unwrap().phase, Phase::AwaitImprovement);
+    assert_eq!(a.status(t).pulses_remaining, 1);
+    let mut applied = false;
+    for n in 1..=60 {
+        t += 10_000;
+        let o = step(&mut a, t, 6.72 + (12.27 - 6.72) * n as f32 / 60.0, 9.25);
+        if o.applied && !applied {
+            assert_eq!(o.pulses_remaining, 0);
+        }
+        applied |= o.applied;
+    }
+    assert!(applied);
+    assert_eq!(a.pulses_applied(), 3);
+    assert!(a.status(t).window.unwrap().pulses_used <= 2);
+    assert!(a.status(t).window.unwrap().on_us <= 300_000);
+}
