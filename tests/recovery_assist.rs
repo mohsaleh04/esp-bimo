@@ -132,6 +132,20 @@ fn pending_and_applied_recovery_cancel_without_immediate_rearming() {
                     i.sample_us = t - 20_001;
                 } // stricter recovery freshness, not base fault
             }
+            if condition == 1 {
+                let first = a.update(i);
+                if active_pulse {
+                    assert!(a.proposed_assist());
+                }
+                assert_ne!(
+                    first.recovery.unwrap().phase,
+                    restart_assist::recovery::Phase::AwaitImprovement
+                );
+                let assisted = a.proposed_assist() && first.proposed_pwm != 0.0;
+                a.acknowledge(t, f32::from(first.proposed_pwm as i16), assisted);
+                t += 10_000;
+                i = input(t, pitch, -1.0);
+            }
             let o = a.update(i);
             assert!(!a.proposed_assist());
             assert!(o.proposed_pwm.abs() <= 50.0);
@@ -660,8 +674,8 @@ fn probe_is_bounded_and_improving_motion_reduces_ordinary_drive() {
         }
     }
     assert_eq!(zero_start.unwrap() - probe_start.unwrap(), 200_000);
-    let o = step(&mut a, 1_010_000, 7.9, -5.0);
-    let raw = input(1_010_000, 7.9, -5.0).mapped_pwm;
+    let o = step(&mut a, 1_010_000, 7.8, -5.0);
+    let raw = input(1_010_000, 7.8, -5.0).mapped_pwm;
     assert!(!o.applied);
     assert!(o.commanded_pwm > 0.0 && o.commanded_pwm <= raw * 0.5);
 }
@@ -1020,4 +1034,193 @@ fn short_recovery_zero_does_not_make_held_demand_or_budget_expiry_a_retry() {
     }
     assert_eq!(a.pulses_applied(), 3);
     assert!(a.status(t).window.unwrap().on_us <= 300_000);
+}
+
+#[test]
+fn fresh_100hz_with_1ms_cached_service_qualifies_fast_and_slow_recovery() {
+    for (angle, rate, growth) in [(6.0, 5.0, 0.05), (8.0, 0.5, 0.005)] {
+        let mut s = Integrated::new();
+        let mut applied = false;
+        for n in 0..150 {
+            let t = 1_010_000 + n * 10_000;
+            s.at(t, angle + n as f32 * growth, rate, true);
+            applied |= s.g.trace(t).unwrap().recovery.unwrap().pulse_applied;
+            for offset in (1_000..10_000).step_by(1_000) {
+                s.g.service(&mut s.m, &mut s.r, || t + offset).unwrap();
+                applied |=
+                    s.g.trace(t + offset)
+                        .unwrap()
+                        .recovery
+                        .unwrap()
+                        .pulse_applied;
+            }
+            assert!(!s.r.finished);
+        }
+        assert!(applied, "rate={rate}; trace={:?}", s.g.trace(s.now));
+        s.r.stop();
+        s.at(s.now + 10_000, 0.0, 0.0, true);
+        assert_eq!(s.m.outputs, (0, 0));
+        assert!(!s.m.armed);
+    }
+}
+#[test]
+fn rejected_fresh_samples_do_not_create_a_sensor_gap() {
+    use restart_assist::recovery::{Reason, Recovery};
+    for rejected in 0..3 {
+        let mut r = Recovery::new();
+        for n in 0..=5 {
+            let mut i = input(n * 10_000, 8.0 + n as f32 * 0.01, 5.0);
+            if n > 0 && n < 5 {
+                if rejected == 0 {
+                    i.rate = -1.0;
+                }
+                if rejected == 1 {
+                    i.pitch = 20.0;
+                }
+            }
+            r.update(
+                i,
+                true,
+                !(rejected == 2 && n > 0 && n < 5),
+                true,
+                true,
+                None,
+                100_000,
+                20_000,
+                150_000,
+            );
+        }
+        assert_ne!(
+            r.telemetry.reason,
+            Some(Reason::EvidenceGap),
+            "rejection={rejected}"
+        );
+    }
+}
+fn initial_running_kick(sign: f32) -> Assist {
+    let mut a = Assist::new_rolling(Config {
+        enabled: true,
+        ..Config::rolling_defaults()
+    });
+    a.enable_recovery();
+    a.acknowledge(0, 0.0, false);
+    for t in (0..=120_000).step_by(10_000) {
+        step(&mut a, t, 0.0, 0.0);
+    }
+    for t in [130_000, 140_000, 150_000] {
+        step(&mut a, t, sign * 6.0, 0.0);
+    }
+    assert!(a.status(150_000).applied);
+    a
+}
+#[test]
+fn isolated_inward_rate_and_cached_repeats_do_not_cancel_running_kick() {
+    for sign in [1.0, -1.0] {
+        let mut a = initial_running_kick(sign);
+        let i = input(160_000, sign * 6.001, -sign * 0.1);
+        let o = a.update(i);
+        assert!(a.proposed_assist(), "isolated rate: {o:?}");
+        a.acknowledge(160_000, f32::from(o.proposed_pwm as i16), true);
+        for t in (161_000..170_000).step_by(1_000) {
+            let mut cached = i;
+            cached.now_us = t;
+            let o = a.update(cached);
+            assert!(a.proposed_assist());
+            a.acknowledge(t, f32::from(o.proposed_pwm as i16), true);
+        }
+        assert!(step(&mut a, 170_000, sign * 6.002, sign * 0.1).applied);
+        assert!(step(&mut a, 180_000, sign * 6.003, -sign * 0.1).applied);
+        let o = step(&mut a, 190_000, sign * 6.002, -sign * 0.1);
+        assert!(!o.applied);
+        assert_eq!(
+            o.suppressed,
+            Some(restart_assist::Reason::TrajectoryImproving)
+        );
+    }
+}
+
+#[test]
+fn actual_received_gap_still_resets_evidence_after_rejected_samples() {
+    use restart_assist::recovery::{Phase, Reason, Recovery};
+    let mut r = Recovery::new();
+    for n in 0..=3 {
+        r.update(
+            input(n * 10_000, 8.0 + n as f32 * 0.01, 5.0),
+            true,
+            n == 0,
+            true,
+            true,
+            None,
+            100_000,
+            20_000,
+            150_000,
+        );
+    }
+    r.update(
+        input(50_001, 8.05, 5.0),
+        true,
+        true,
+        true,
+        true,
+        None,
+        100_000,
+        20_000,
+        150_000,
+    );
+    assert_eq!(r.telemetry.reason, Some(Reason::EvidenceGap));
+    r.update(
+        input(60_001, 8.06, 5.0),
+        true,
+        true,
+        true,
+        true,
+        None,
+        100_000,
+        20_000,
+        150_000,
+    );
+    assert_eq!(r.telemetry.phase, Phase::Trend);
+    assert_ne!(r.telemetry.reason, Some(Reason::EvidenceGap));
+}
+#[test]
+fn measured_angle_reduction_can_end_a_kick_without_waiting_for_two_rates() {
+    for sign in [1.0, -1.0] {
+        let mut a = initial_running_kick(sign);
+        let o = step(&mut a, 160_000, sign * 5.89, sign * 0.1);
+        assert!(!o.applied);
+        assert_eq!(
+            o.suppressed,
+            Some(restart_assist::Reason::TrajectoryImproving)
+        );
+        assert_eq!(o.last_pulse_us, 10_000);
+    }
+}
+#[test]
+fn cached_spike_does_not_extend_kick_past_target_or_hide_stale_data() {
+    let mut a = initial_running_kick(1.0);
+    for t in (160_000..=250_000).step_by(10_000) {
+        let rate = if t == 190_000 { -0.1 } else { 0.1 };
+        let o = step(&mut a, t, 6.001, rate);
+        if t < 250_000 {
+            assert!(o.applied);
+        } else {
+            assert!(!o.applied);
+            assert_eq!(o.last_pulse_us, 100_000);
+        }
+    }
+    let mut a = initial_running_kick(1.0);
+    let mut cached = input(150_000, 6.0, 0.0);
+    for t in (151_000..=191_000).step_by(1_000) {
+        cached.now_us = t;
+        let o = a.update(cached);
+        if t > 190_000 {
+            assert_eq!(o.state, restart_assist::State::Disarmed);
+            assert_eq!(o.proposed_pwm, 0.0);
+        }
+        a.acknowledge(
+            t,
+            f32::from(o.proposed_pwm as i16),
+            a.proposed_assist() && o.proposed_pwm != 0.0,
+        );
+    }
 }

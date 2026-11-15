@@ -58,7 +58,10 @@ pub enum Decision {
 pub struct Recovery {
     pub telemetry: Telemetry,
     trend: Option<(u64, f32)>,
-    previous: Option<(u64, f32)>,
+    previous: Option<(u64, f32)>, // Last accepted eligible observation, not arrival timing.
+    received: Option<(u64, f32, i16, bool)>, // Every fresh arrival: time, angle, direction, inward.
+    kick_peak: Option<(i16, f32)>,
+    confirmed_improving: bool,
     direction: i16,
     peak: f32,
     probe_since: u64,
@@ -76,6 +79,9 @@ impl Recovery {
             },
             trend: None,
             previous: None,
+            received: None,
+            kick_peak: None,
+            confirmed_improving: false,
             direction: 0,
             peak: 0.0,
             probe_since: 0,
@@ -103,7 +109,17 @@ impl Recovery {
             Decision::Ordinary
         }
     }
+    pub fn confirmed_improvement(&self) -> bool {
+        self.confirmed_improving
+    }
     pub fn acknowledge(&mut self, assisted: bool) {
+        if assisted {
+            if self.kick_peak.is_none() {
+                self.kick_peak = self.received.map(|(_, angle, sign, _)| (sign, angle));
+            }
+        } else {
+            self.kick_peak = None;
+        }
         if matches!(self.telemetry.phase, Phase::ZeroWait | Phase::Qualifying) && assisted {
             self.telemetry.phase = Phase::Pulse;
             self.telemetry.pulse_applied = true;
@@ -112,15 +128,19 @@ impl Recovery {
             self.finish(Reason::Completed);
         }
     }
-    fn observe_improvement(&mut self, i: Input, fresh: bool) {
+    fn observe_improvement(
+        &mut self,
+        i: Input,
+        fresh: bool,
+        previous: Option<(u64, f32, i16, bool)>,
+    ) {
         if !fresh {
             return;
         }
         let angle = i.pitch.abs();
-        let continuous = self
-            .previous
-            .is_some_and(|(t, _)| i.sample_us.saturating_sub(t) <= MAX_EVIDENCE_GAP_US);
-        let toward = i.pitch * i.rate < 0.0 && self.previous.is_some_and(|(_, p)| angle <= p);
+        let continuous = previous
+            .is_some_and(|(t, _, _, _)| i.sample_us.saturating_sub(t) <= MAX_EVIDENCE_GAP_US);
+        let toward = i.pitch * i.rate < 0.0 && previous.is_some_and(|(_, p, _, _)| angle <= p);
         let upright =
             angle <= crate::balance::ARM_ANGLE_DEG && i.rate.abs() <= crate::balance::ARM_RATE_DPS;
         if i.now_us.saturating_sub(i.sample_us) > MAX_EVIDENCE_GAP_US
@@ -146,7 +166,34 @@ impl Recovery {
                 self.peak = angle;
             }
         }
-        self.previous = Some((i.sample_us, angle));
+    }
+    /// Record ALL fresh arrivals, even if eligibility rejects the observation below.
+    /// Cached service calls never count as corroborating observations.
+    fn receive(&mut self, i: Input, fresh: bool) -> Option<(u64, f32, i16, bool)> {
+        let previous = self.received;
+        if fresh {
+            self.confirmed_improving = false;
+            let sign = i.limited_pd.signum();
+            let angle = i.pitch.abs();
+            let inward =
+                i.pitch * f32::from(sign) > 0.0 && i.rate * f32::from(sign) < IMPROVING_RATE;
+            let consecutive = previous.is_some_and(|(t, _, direction, was_inward)| {
+                i.sample_us > t
+                    && i.sample_us - t <= MAX_EVIDENCE_GAP_US
+                    && sign == direction
+                    && was_inward
+            });
+            self.confirmed_improving = inward && consecutive;
+            if let Some((direction, peak)) = self.kick_peak.as_mut()
+                && *direction == sign
+                && i.pitch * f32::from(sign) > 0.0
+            {
+                *peak = peak.max(angle);
+                self.confirmed_improving |= *peak - angle >= IMPROVING_ANGLE;
+            }
+            self.received = Some((i.sample_us, angle, sign, inward));
+        }
+        previous
     }
     #[allow(clippy::too_many_arguments)]
     pub fn update(
@@ -162,11 +209,12 @@ impl Recovery {
         pulse_us: u64,
     ) -> Decision {
         self.telemetry.zero_wait_us = zero_us;
+        let previous_received = self.receive(i, fresh);
         if self.telemetry.phase == Phase::Spent {
             return Decision::Ordinary;
         }
         if self.telemetry.phase == Phase::AwaitImprovement {
-            self.observe_improvement(i, fresh);
+            self.observe_improvement(i, fresh, previous_received);
             return Decision::Ordinary;
         }
         let busy = self.telemetry.attempted;
@@ -185,7 +233,14 @@ impl Recovery {
         if i.now_us.saturating_sub(i.sample_us) > MAX_EVIDENCE_GAP_US {
             return self.reject(Reason::EvidenceGap);
         }
-        if i.rate * f32::from(sign) < IMPROVING_RATE {
+        if fresh
+            && previous_received
+                .is_some_and(|(t, _, _, _)| i.sample_us.saturating_sub(t) > MAX_EVIDENCE_GAP_US)
+        {
+            self.peak = angle;
+            return self.reject(Reason::EvidenceGap);
+        }
+        if self.confirmed_improving {
             return self.reject(Reason::Improving);
         }
         if !resources && self.telemetry.phase != Phase::Pulse {
@@ -223,22 +278,17 @@ impl Recovery {
             return self.reject(Reason::Margin);
         }
         if fresh {
-            if let Some((t, _)) = self.previous
-                && i.sample_us.saturating_sub(t) > MAX_EVIDENCE_GAP_US
-            {
-                self.previous = Some((i.sample_us, angle));
-                self.peak = angle;
-                return self.reject(Reason::EvidenceGap);
-            }
             if self.direction != sign && !busy {
                 self.trend = None;
                 self.peak = angle;
                 self.direction = sign;
             }
+            let reduced = self.previous.is_some_and(|(_, p)| angle < p);
             self.peak = self.peak.max(angle);
             self.previous = Some((i.sample_us, angle));
             // Ignore sub-0.1deg sample noise; cumulative improvement from peak cancels.
-            if self.peak - angle >= IMPROVING_ANGLE {
+            if reduced && self.peak - angle >= IMPROVING_ANGLE {
+                self.confirmed_improving = true;
                 self.peak = angle;
                 return self.reject(Reason::Improving);
             }
@@ -263,8 +313,16 @@ impl Recovery {
             self.telemetry.phase = Phase::Qualifying;
             return Decision::Permit;
         }
-        if !ordinary || !fresh || i.rate * f32::from(sign) < 0.0 {
+        if !fresh {
+            return Decision::Ordinary;
+        } // No new evidence: retain accumulated trend.
+        if !ordinary {
             self.trend = None;
+            return Decision::Ordinary;
+        }
+        // An isolated inward-rate sample neither advances nor destroys the trend.
+        // Corroborated improvement above resets it; timers/safety still run on every poll.
+        if i.rate * f32::from(sign) < 0.0 {
             return Decision::Ordinary;
         }
         let (since, start) = *self.trend.get_or_insert((i.sample_us, angle));

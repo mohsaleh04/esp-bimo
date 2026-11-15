@@ -65,9 +65,12 @@ require independent hardware power cutoff; software cannot guarantee boot/reset
 GPIO safety. The normal Rolling/fixed paths retain their previous 60 ms reserve.
 
 Neutral demand, direction conflict, invalid/stale data, margin loss and faults can
-terminate sooner. Actual inward angular velocity cancels rather than being forced
-to complete a minimum pulse. To tolerate small angle noise, measured improvement
-of >=0.1 degree from the episode's peak also cancels. Thus 100 ms is a target,
+terminate sooner. Improvement is corroborated by two consecutive fresh inward-rate
+observations in the same corrective direction (no more than the existing 20 ms
+freshness gap apart), OR the existing >=0.1 degree measured reduction from peak.
+A single inward-rate spike and repeated cached copies do not end a running Kick.
+This confirmation also applies to regular startup Kicks, not just recovery pulses.
+No new numeric threshold is introduced and 100 ms is not a minimum pulse time. Thus 100 ms is a target,
 not a minimum on-time or guaranteed physical startup. It is not a 100% duty boost.
 Forward remains 70%, backward 65%; shared limits remain two pulses/300 ms per
 1.5-second window and 300 ms cooldown. No budget is replenished by this policy.
@@ -168,3 +171,28 @@ LIVE-capable compilation only (does not flash/run):
 ```sh
 cargo build --release --locked --bin balance-control-test --features balance-control-live,balance-control-short-recovery-zero
 ```
+
+
+## Sensor polling and evidence bookkeeping correction
+
+The control loop polls about every millisecond; fresh BMI160 samples arrive about
+every 10 ms. Cached service calls preserve accumulated trend evidence; they cannot
+advance it or count as another inward-rate observation. Pulse/probe timing,
+freshness, budgets and fault shutdown continue to run on every cached call.
+An isolated fresh inward-rate observation does not advance deterioration evidence;
+corroborated improvement resets/cancels it. Independent cancellation gates remain.
+
+Arrival timing is recorded for EVERY fresh valid observation before eligibility
+checks, separately from accepted trajectory history and the trend's start sample.
+Rejected rate/margin/resource observations therefore cannot fabricate a subsequent
+EvidenceGap. Actual >20 ms arrival gaps still reject recovery evidence; the normal
+40 ms sample freshness fault and all other sensor limits remain unchanged.
+Rearming after improvement also uses real arrival continuity.
+
+Regression tests include actual arbiter service calls at 1 ms between 100 Hz
+fresh samples for both qualification paths, accepted/rejected arrival sequences,
+real gaps, isolated inward spikes plus cached repeats, consecutive inward samples,
+angle-confirmed early stop, unchanged target duration and stale-data shutdown.
+These are software tests, not proof that noise has been eliminated or that a
+physical correction succeeds. Correlated noisy samples can still satisfy a
+confirmation rule; no wheel motion is inferred.

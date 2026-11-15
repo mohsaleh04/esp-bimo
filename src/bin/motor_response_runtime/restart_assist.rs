@@ -429,9 +429,10 @@ impl Assist {
             self.state = self.resting_state(i.now_us);
             return self.propose(i.now_us, 0.0, false, Some(reason));
         }
-        if self.recovery.is_some()
-            && i.pitch * f32::from(sign) > 0.0
-            && i.rate * f32::from(sign) < recovery::IMPROVING_RATE
+        if self
+            .recovery
+            .as_ref()
+            .is_some_and(|r| r.confirmed_improvement())
         {
             return self.propose(
                 i.now_us,
