@@ -13,12 +13,12 @@ use esp_hal::{
 
 use super::control::{CommandGate, Direction};
 use super::{Disarmed, DualMotor, DutyLimit};
-use crate::board::InactiveOutputs;
+use crate::board::MotorOutputs;
 
 /// Owns all six original GPIO drivers; enable pins are never surrendered to PWM.
 /// A/B correspond to ENA/ENB, with no wheel or physical direction assumptions.
 pub struct L298n {
-    pins: InactiveOutputs,
+    pins: MotorOutputs,
     a: PwmPin<'static, MCPWM0<'static>, 0, true>,
     b: PwmPin<'static, MCPWM0<'static>, 0, false>,
     timer: Timer<0, MCPWM0<'static>>,
@@ -29,12 +29,12 @@ pub struct L298n {
 
 impl L298n {
     /// Fixed 10 kHz / 1000-count PWM. Starts stopped and disarmed.
-    pub fn new(peripheral: MCPWM0<'static>, mut pins: InactiveOutputs, limit: DutyLimit) -> Self {
+    pub fn new(peripheral: MCPWM0<'static>, mut pins: MotorOutputs, limit: DutyLimit) -> Self {
         pins.stop();
         let clock =
             PeripheralClockConfig::with_frequency(Rate::from_mhz(40)).expect("fixed MCPWM clock");
         let timer_config = clock
-            .timer_clock_with_frequency(999, PwmWorkingMode::Increase, Rate::from_khz(10))
+            .timer_clock_with_frequency(999, PwmWorkingMode::Increase, Rate::from_khz(35))
             .expect("fixed motor PWM frequency");
         let mut pwm = McPwm::new(peripheral, clock);
         pwm.operator0.set_timer(&pwm.timer0);
@@ -143,7 +143,7 @@ impl Drop for L298n {
     }
 }
 
-impl InactiveOutputs {
+impl MotorOutputs {
     pub(crate) fn stop(&mut self) {
         // Write GPIO latches BEFORE switching the matrix away from PWM.
         self.ena.set_low();

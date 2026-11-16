@@ -225,3 +225,45 @@ without allocation growth or blocking serial output in control. After actual mot
 shutdown, the same bounded buffers are dumped; longer ACTIVE time does not add
 unbounded final-dump work. Full-history capture would require a separately designed
 storage/export solution and is not part of this duration-only change.
+
+## Phase 2 stability summary
+
+Only `balance-control-test` collects the new ACTIVE-only streaming summary. The
+start timestamp is the existing fresh-neutral acceptance transition. Collection
+ends at shutdown; preparation, calibration, DRY and final serial dumping are
+excluded. No control parameters or motor commands are changed.
+
+After actual motor shutdown, three `PHASE2` lines report:
+
+- **STABILITY:** ACTIVE microseconds, inclusive time within ±1/2/3/5 degrees,
+  unknown-pose time, longest consecutive interval within ±2 degrees, and maximum
+  absolute estimated pitch and pitch rate.
+- **COMMANDS:** commanded-zero/nonzero time, accepted applied Kick count, total
+  and maximum acknowledged Kick duration, and individual durations in microseconds.
+  Mapper proposals are not counted as applied Kicks. Restart Assist supplies its
+  existing acknowledged pulse timestamps; legacy Kick timing is snapshot-based
+  and explicitly marked `kick_timing_estimated=true`.
+- **HEURISTICS:** pitch crossings confirmed across a ±0.25-degree noise band,
+  overshoot-like events, nonzero applied-command direction changes (ignoring
+  intervening zeros), disarm reason, ACTIVE and whole-run missed deadlines, and
+  diagnostic timestamp/input anomalies.
+
+Elapsed time and accepted command/Kick counters are software observations, not
+motor-speed measurements. Pitch/rate extrema are sampled IMU-estimator values.
+Time-in-band uses the last valid estimate, held only to the existing 40 ms freshness
+limit; uncovered time is reported as unknown and breaks the near-upright run.
+Command timing follows acknowledged snapshots, so sub-loop switching latency is
+not measured. Samples between observations cannot be reconstructed.
+
+“Near upright” (±2 degrees), noise-filtered crossings, and “overshoot-like” are
+explicit diagnostic definitions, not controller settings. An overshoot-like event
+is a confirmed pitch crossing after a same-side corrective command on the previous
+side. It does not establish cause, wheel motion, or autonomous stabilization.
+Neither IMU data nor these counters proves that the body was unsupported.
+
+Accumulators cover the full 90-second window independently of overwritten detailed
+telemetry. A fixed 128-entry duration array retains individual Kick durations;
+missing/overflowed durations are counted explicitly, while total/count statistics
+continue. Existing recent detailed snapshots/events remain available unchanged.
+There is no allocation growth or serial output in this accumulator. RAM statistics
+are lost on reset/crash, and hardware loop overhead still requires a DRY measurement.

@@ -26,7 +26,7 @@ async fn main(_spawner: Spawner) -> ! {
     let effective = limit.map(100);
     assert_eq!(effective.duty_percent, 100, "100% must not be clamped");
     assert_eq!(effective.direction.inputs(), (true, false)); // IN1 HIGH, IN2 LOW
-    let mut motors = L298n::new(board.motor_pwm, board.inactive_outputs, limit);
+    let mut motors = L298n::new(board.motor_pwm, board.motor_outputs, limit);
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
     let timg0 = TimerGroup::new(board.timer_group);
     esp_rtos::start(timg0.timer0, board.rtos_interrupt);

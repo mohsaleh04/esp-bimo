@@ -26,7 +26,7 @@ async fn main(_spawner: Spawner) -> ! {
     let board = Board::init(p);
     let mut motors = L298n::new(
         board.motor_pwm,
-        board.inactive_outputs,
+        board.motor_outputs,
         DutyLimit::new(CEILING),
     );
     shutdown(&mut motors);

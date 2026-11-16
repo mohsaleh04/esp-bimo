@@ -24,6 +24,7 @@ mod bidirectional;
 mod events;
 pub mod ground;
 mod ground_timing;
+mod stability;
 use events::{EventLog, Snapshot};
 mod capture;
 mod control_profile;
@@ -185,7 +186,7 @@ async fn run_profile(
     let board = Board::init(p);
     let mut motors = L298n::new(
         board.motor_pwm,
-        board.inactive_outputs,
+        board.motor_outputs,
         DutyLimit::new(MOTOR_DUTY_CEILING),
     );
     motors.disarm();
@@ -320,6 +321,7 @@ async fn run_profile(
     }
     let mut capture = capture::Capture::<Snapshot, 64>::new();
     let mut behavior = control_profile::Behavior::default();
+    let mut stability = stability::Stability::default();
     let mut logged_transitions = 0;
     let mut previous_sample = None;
     let mut timing = LoopTiming::default();
@@ -389,7 +391,55 @@ async fn run_profile(
                 reversal.reset(epoch.elapsed().as_micros(), &response);
             }
             if continuous {
-                behavior.update(epoch.elapsed().as_micros(), response.state(), None, (0, 0));
+                if !stability.has_started() {
+                    for transition in response.transitions().iter().flatten() {
+                        if transition.to == ResponseState::Active {
+                            stability.start(transition.us);
+                            break;
+                        }
+                    }
+                }
+                let stopped_at = epoch.elapsed().as_micros();
+                stability.finish(
+                    stopped_at,
+                    response.disarm_reason,
+                    timing.missed_deadlines,
+                    reversal.trace(stopped_at),
+                    reversal.kicks(stopped_at),
+                );
+                info!(
+                    "PHASE2 STABILITY: active_started={} active_us={} within_[1,2,3,5]deg_us={:?} unknown_pose_us={} longest_within_2deg_us={} max_abs_pitch={}deg max_abs_rate={}deg/s",
+                    stability.has_started(),
+                    stability.active_us,
+                    stability.within_us,
+                    stability.unknown_pose_us,
+                    stability.longest_near_us,
+                    stability.max_abs_pitch,
+                    stability.max_abs_rate
+                );
+                info!(
+                    "PHASE2 COMMANDS: zero_us={} nonzero_us={} accepted_kicks={} kick_on_us={} max_kick_us={} kick_timing_estimated={} duration_records_missing={} durations_us={:?}",
+                    stability.zero_us,
+                    stability.nonzero_us,
+                    stability.kick_count,
+                    stability.kick_on_us,
+                    stability.max_kick_us,
+                    stability.kick_timing_estimated,
+                    stability.missing_kick_records,
+                    stability.kick_durations_us()
+                );
+                info!(
+                    "PHASE2 HEURISTICS: pitch_crossings_0.25deg={} overshoot_like={} applied_direction_changes={}; disarm={:?} active_missed_deadlines={} all_run_missed_deadlines={} clock_errors={} invalid_samples={}; IMU/command observations do NOT establish unsupported balancing",
+                    stability.zero_crossings,
+                    stability.overshoot_like,
+                    stability.correction_sign_changes,
+                    stability.disarm,
+                    stability.active_missed_deadlines,
+                    timing.missed_deadlines,
+                    stability.clock_errors,
+                    stability.invalid_samples
+                );
+                behavior.update(stopped_at, response.state(), None, (0, 0));
                 info!(
                     "CONTROL STATE {}; behavior={behavior:?}; reason={:?}",
                     control_profile::Stage::Disarmed.label(),
@@ -862,6 +912,17 @@ async fn run_profile(
             work_us: timing.work_us,
             missed: timing.missed_deadlines,
         };
+        if continuous {
+            if !stability.has_started() && response.state() == ResponseState::Active {
+                for transition in response.transitions().iter().flatten() {
+                    if transition.to == ResponseState::Active {
+                        stability.start(transition.us);
+                        break;
+                    }
+                }
+            }
+            stability.observe(&snapshot);
+        }
         events.observe(snapshot);
         if continuous {
             capture.record(snapshot.us, snapshot);

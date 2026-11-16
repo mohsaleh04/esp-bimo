@@ -21,13 +21,13 @@ pub struct Board {
     pub balance_watchdog: esp_hal::peripherals::TIMG1<'static>,
     pub buzzer: Output<'static>,
     pub i2c: I2c<'static, Blocking>,
-    pub inactive_outputs: InactiveOutputs,
+    pub motor_outputs: MotorOutputs,
     pub bmi160_int1: Input<'static>,
     pub qmc5883l_drdy: Input<'static>,
 }
 
 /// Initial inactive state. Move this entire owner into L298n; never recreate pins.
-pub struct InactiveOutputs {
+pub struct MotorOutputs {
     pub(crate) ena: Output<'static>,
     pub(crate) enb: Output<'static>,
     pub(crate) in1: Output<'static>,
@@ -41,7 +41,7 @@ impl Board {
     pub fn init(p: Peripherals) -> Self {
         // Enables first. External pull-downs / hardware gating are required
         // for reset and pre-boot safety; software cannot provide that guarantee.
-        let outputs = InactiveOutputs {
+        let outputs = MotorOutputs {
             ena: Output::new(p.GPIO16, Level::Low, OutputConfig::default()),
             enb: Output::new(p.GPIO17, Level::Low, OutputConfig::default()),
             in1: Output::new(p.GPIO5, Level::Low, OutputConfig::default()),
@@ -71,7 +71,7 @@ impl Board {
             balance_watchdog: p.TIMG1,
             buzzer,
             i2c,
-            inactive_outputs: outputs,
+            motor_outputs: outputs,
             bmi160_int1: Input::new(p.GPIO41, InputConfig::default()),
             qmc5883l_drdy: Input::new(p.GPIO12, InputConfig::default()),
         }

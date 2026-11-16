@@ -94,7 +94,7 @@ async fn main(_spawner: Spawner) -> ! {
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let board = Board::init(p); // Enables and direction outputs LOW first.
     let limit = DutyLimit::new(MAX_DUTY_PERCENT);
-    let mut motors = L298n::new(board.motor_pwm, board.inactive_outputs, limit);
+    let mut motors = L298n::new(board.motor_pwm, board.motor_outputs, limit);
     motors.disarm();
     motors.set_command_logging(false); // Use explicit phase/duty logs below; no per-command driver telemetry.
     let _buzzer = board.buzzer; // Keep active-low buzzer inactive.

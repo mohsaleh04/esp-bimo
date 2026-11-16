@@ -23,7 +23,7 @@ command gate and signed-percent mapping. A future TB6612FNG implementation can
 implement that trait without changing callers. `src/motors/l298n.rs` implements
 this interface for the wired L298N.
 
-`InactiveOutputs` moves intact from board setup into `L298n::new`; all six
+`MotorOutputs` moves intact from board setup into `L298n::new`; all six
 original GPIO drivers are retained. There is no pin stealing, cloning, unsafe
 code, or drop-and-recreate handoff. The enable output latches remain LOW.
 MCPWM0 operator0 A/B generate independent duty cycles at 10 kHz using timer0

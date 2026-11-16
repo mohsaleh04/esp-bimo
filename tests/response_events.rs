@@ -1192,3 +1192,217 @@ fn dry_capture_stop_is_permanent_and_output_gate_disarms_before_dump() {
     );
     assert_eq!(r.state(), ResponseState::Disarmed);
 }
+
+#[path = "../src/bin/motor_response_runtime/stability.rs"]
+mod stability;
+#[test]
+fn phase2_full_90_seconds_survives_record_overflow_without_losing_statistics() {
+    let mut stats = stability::Stability::default();
+    let mut events = EventLog::<2>::new();
+    stats.start(500_000);
+    for t in (500_000..=90_500_000).step_by(1_000) {
+        let mut s = snapshot(t);
+        s.sample_us = Some(500_000 + (t - 500_000) / 10_000 * 10_000);
+        s.pitch = Some(0.5);
+        s.rate = Some(0.0);
+        s.commanded = (0, 0);
+        if t == 90_500_000 {
+            s.state = ResponseState::Disarmed;
+            s.disarm = Some(DisarmReason::ActiveTimeout);
+        }
+        s.requested = if (t / 100_000) % 2 == 0 {
+            (-1, 1)
+        } else {
+            (0, 0)
+        }; // Stress event storage only.
+        stats.observe(&s);
+        events.observe(s);
+    }
+    assert_eq!(stats.active_us, 90_000_000);
+    assert_eq!(stats.within_us, [90_000_000; 4]);
+    assert_eq!(stats.longest_near_us, 90_000_000);
+    assert_eq!(stats.zero_us, 90_000_000);
+    assert_eq!(stats.nonzero_us, 0);
+    assert_eq!(stats.zero_crossings, 0);
+    assert_eq!(stats.disarm, Some(DisarmReason::ActiveTimeout));
+    assert!(events.overwritten > 0);
+    assert_eq!(events.terminal.unwrap().us, 90_500_000);
+}
+#[test]
+fn phase2_band_timing_and_noise_crossing_are_active_only() {
+    let mut stats = stability::Stability::default();
+    let mut s = snapshot(0);
+    s.state = ResponseState::DryRun;
+    s.pitch = Some(20.0);
+    stats.observe(&s);
+    stats.start(100_000);
+    for (n, p) in [0.1, -0.1, 0.2, 0.5, 1.5, 2.5, 4.0, 6.0, -0.5]
+        .into_iter()
+        .enumerate()
+    {
+        let t = 100_000 + n as u64 * 10_000;
+        s = snapshot(t);
+        s.pitch = Some(p);
+        s.rate = Some(n as f32);
+        stats.observe(&s);
+    }
+    s = snapshot(190_000);
+    s.state = ResponseState::Disarmed;
+    stats.observe(&s);
+    assert_eq!(stats.active_us, 90_000);
+    assert_eq!(stats.within_us, [50_000, 60_000, 70_000, 80_000]);
+    assert_eq!(stats.zero_crossings, 1);
+    assert_eq!(stats.overshoot_like, 1);
+    assert_eq!(stats.max_abs_pitch, 6.0);
+    assert_eq!(stats.max_abs_rate, 8.0);
+}
+
+fn phase2_kick_sample(us: u64, count: u8, applied: bool, total: u64, last: u64) -> Snapshot {
+    let mut s = snapshot(us);
+    s.pitch = Some(0.5);
+    s.kick = applied;
+    s.commanded = if applied { (-70, 70) } else { (0, 0) };
+    s.reversal = Some(bidirectional::Telemetry {
+        pending_direction: 0,
+        zero_elapsed_us: 0,
+        kicks: count,
+        kick_applied: applied,
+    });
+    let a = restart_assist::Assist::new(restart_assist::Config::default());
+    let mut t = a.status(us);
+    t.applied = applied;
+    t.pulse_us = 0;
+    t.total_on_us = total;
+    t.last_pulse_us = last;
+    s.assist = Some(t);
+    s
+}
+#[test]
+fn phase2_uses_acknowledged_kick_durations_and_bounded_storage() {
+    // Storage stress only: this synthetic event rate is NOT an allowed motor policy.
+    let mut stats = stability::Stability::default();
+    stats.start(0);
+    for i in 0..130_u64 {
+        stats.observe(&phase2_kick_sample(
+            i * 2_000,
+            (i + 1) as u8,
+            true,
+            i * 1_000,
+            if i == 0 { 0 } else { 1_000 },
+        ));
+        stats.observe(&phase2_kick_sample(
+            i * 2_000 + 1_000,
+            (i + 1) as u8,
+            false,
+            (i + 1) * 1_000,
+            1_000,
+        ));
+    }
+    stats.finish(
+        260_000,
+        Some(DisarmReason::Stop),
+        0,
+        phase2_kick_sample(260_000, 130, false, 130_000, 1_000).assist,
+        130,
+    );
+    assert_eq!(stats.kick_count, 130);
+    assert_eq!(stats.kick_on_us, 130_000);
+    assert_eq!(stats.max_kick_us, 1_000);
+    assert!(!stats.kick_timing_estimated);
+    assert_eq!(stats.kick_durations_us(), &[1_000; 128]);
+    assert_eq!(stats.missing_kick_records, 2);
+    assert_eq!(stats.zero_us + stats.nonzero_us, stats.active_us);
+}
+#[test]
+fn phase2_detects_a_short_acknowledged_pulse_absent_from_periodic_history() {
+    let mut stats = stability::Stability::default();
+    stats.start(0);
+    stats.observe(&phase2_kick_sample(0, 0, false, 0, 0));
+    let mut s = phase2_kick_sample(1_000, 1, false, 300, 300);
+    s.state = ResponseState::Disarmed;
+    s.disarm = Some(DisarmReason::Fault(balance::Fault::Timing));
+    s.missed = 1;
+    stats.observe(&s);
+    assert_eq!(stats.kick_count, 1);
+    assert_eq!(stats.kick_on_us, 300);
+    assert_eq!(stats.kick_durations_us(), &[300]);
+    assert_eq!(stats.active_missed_deadlines, 1);
+    assert_eq!(stats.disarm, s.disarm);
+    stats.observe(&snapshot(10_000));
+    assert_eq!(stats.active_us, 1_000); // Frozen after stop.
+}
+#[test]
+fn phase2_clips_pose_freshness_and_handles_duplicate_backwards_and_invalid_times() {
+    let mut stats = stability::Stability::default();
+    stats.start(0);
+    let mut s = snapshot(0);
+    s.pitch = Some(0.5);
+    s.commanded = (0, 0);
+    stats.observe(&s);
+    stats.observe(&s);
+    s.us = 100_000; // Cached estimate is now stale: never charge the whole gap as upright.
+    stats.observe(&s);
+    assert_eq!(stats.active_us, 100_000);
+    assert_eq!(stats.within_us, [40_000; 4]);
+    assert_eq!(stats.unknown_pose_us, 60_000);
+    assert_eq!(stats.longest_near_us, 40_000);
+    s.us = 99_999;
+    stats.observe(&s);
+    assert_eq!(stats.clock_errors, 1);
+    s.us = 100_000;
+    s.sample_us = Some(100_001);
+    stats.observe(&s);
+    s.sample_us = Some(100_000);
+    s.pitch = Some(f32::NAN);
+    stats.observe(&s);
+    stats.finish(110_000, Some(DisarmReason::Stop), 0, None, 0);
+    assert_eq!(stats.active_us, 110_000);
+    assert_eq!(stats.unknown_pose_us, 70_000);
+    assert_eq!(stats.zero_us + stats.nonzero_us, 110_000);
+    assert!(stats.invalid_samples >= 2);
+    assert_eq!(stats.zero_crossings, 0);
+}
+#[test]
+fn phase2_applied_direction_changes_ignore_neutral_intervals_and_dry() {
+    let mut stats = stability::Stability::default();
+    let mut s = snapshot(0);
+    s.state = ResponseState::DryRun;
+    stats.observe(&s);
+    assert_eq!(stats.active_us, 0);
+    assert!(!stats.has_started());
+    stats.start(100_000);
+    for (n, command) in [(-30, 30), (0, 0), (0, 0), (30, -30), (0, 0), (-30, 30)]
+        .into_iter()
+        .enumerate()
+    {
+        s = snapshot(100_000 + n as u64 * 10_000);
+        s.commanded = command;
+        stats.observe(&s);
+    }
+    stats.finish(160_000, Some(DisarmReason::Stop), 0, None, 0);
+    assert_eq!(stats.correction_sign_changes, 2);
+    assert_eq!(stats.zero_us, 30_000);
+    assert_eq!(stats.nonzero_us, 30_000);
+}
+
+#[test]
+fn phase2_legacy_timing_is_labelled_and_no_active_run_stays_empty() {
+    assert!(core::mem::size_of::<stability::Stability>() < 1024);
+    let mut empty = stability::Stability::default();
+    empty.finish(100, Some(DisarmReason::Stop), 2, None, 0);
+    assert_eq!(empty.active_us, 0);
+    assert!(!empty.has_started());
+    let mut stats = stability::Stability::default();
+    let mut s = phase2_kick_sample(0, 1, true, 0, 0);
+    s.assist = None;
+    stats.observe(&s);
+    s.us = 10_000;
+    s.sample_us = Some(10_000);
+    s.kick = false;
+    s.commanded = (0, 0);
+    stats.observe(&s);
+    stats.finish(20_000, Some(DisarmReason::Stop), 0, None, 1);
+    assert!(stats.kick_timing_estimated);
+    assert_eq!(stats.kick_durations_us(), &[10_000]);
+    assert_eq!(stats.kick_on_us, 10_000);
+}

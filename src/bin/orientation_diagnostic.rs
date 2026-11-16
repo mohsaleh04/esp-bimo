@@ -309,7 +309,7 @@ async fn main(_spawner: Spawner) -> ! {
     let board = Board::init(p);
     // Retain all six motor GPIOs LOW. Do not initialize a motor driver or PWM,
     // expose an arm path, or run either motor-test binary from this diagnostic.
-    let _inactive_outputs = board.inactive_outputs;
+    let _inactive_outputs = board.motor_outputs;
     let _buzzer = board.buzzer; // active-low input stays HIGH; calibration is silent
     let _qmc = board.qmc5883l_drdy;
     let int1 = board.bmi160_int1;

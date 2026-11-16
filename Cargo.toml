@@ -107,7 +107,7 @@ esp-backtrace = { version = "0.20.0", features = [
     "panic-handler",
     "println",
 ] }
-esp-println = { version = "0.18.0", features = ["esp32s3", "log-04"] }
+esp-println = { version = "0.18.0", default-features = false, features = ["esp32s3", "log-04", "jtag-serial", "critical-section"] }
 
 critical-section = "1.2.0"
 static_cell = "2.1.1"
@@ -134,3 +134,7 @@ required-features = ["motor-duty-characterization"]
 name = "motor-continuation-characterization"
 path = "src/bin/motor_continuation_characterization.rs"
 required-features = ["motor-continuation-characterization"]
+
+[[bin]]
+name = "hardware_diagnostics"
+path = "src/bin/hardware_diagnostics.rs"

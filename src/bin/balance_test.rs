@@ -67,7 +67,7 @@ async fn main(_spawner: Spawner) -> ! {
     info!("DRY-only PWM mapping: {DRY_PWM:?}; motors remain OFF");
     let mut motors = L298n::new(
         board.motor_pwm,
-        board.inactive_outputs,
+        board.motor_outputs,
         DutyLimit::new(settings.output_limit as u8),
     );
     motors.set_command_logging(false);

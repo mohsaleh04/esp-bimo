@@ -4,7 +4,7 @@ pub const KI: f32 = 0.0; // No integral state or automatic friction compensation
 pub const ARM_ANGLE_DEG: f32 = 5.0;
 pub const ARM_RATE_DPS: f32 = 5.0;
 pub const FALL_ANGLE_DEG: f32 = 15.0; // Existing standalone/response diagnostics.
-pub const CONTROL_FALL_ANGLE_DEG: f32 = 21.0;
+pub const CONTROL_FALL_ANGLE_DEG: f32 = 25.0;
 pub const UPRIGHT_DWELL_US: u64 = 500_000;
 pub const MAX_SAMPLE_GAP_US: u64 = 40_000;
 pub const MAX_ACTIVE_US: u64 = 2_000_000; // Short first experiments, never unattended.
@@ -18,7 +18,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            kp: 1.0,
+            kp: 1.2,
             kd: 0.08,
             output_limit: 15,
         }

@@ -36,7 +36,7 @@ async fn main(spawner: Spawner) -> ! {
     // No arm() or nonzero commands in normal firmware.
     let _motors = esp_bimo::motors::l298n::L298n::new(
         board.motor_pwm,
-        board.inactive_outputs,
+        board.motor_outputs,
         esp_bimo::motors::DutyLimit::new(30),
     );
     let _bmi160_int1 = board.bmi160_int1;
