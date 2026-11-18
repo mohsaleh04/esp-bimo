@@ -79,3 +79,15 @@ fn bridge_direction_inverts_a_once_and_preserves_b_and_stop() {
         assert_eq!(Channel::B.direction_inputs(direction), b);
     }
 }
+
+#[test]
+fn disarm_rejects_every_nonzero_command_and_accepts_zero() {
+    let mut gate = control::CommandGate::default();
+    assert!(gate.check(1, 0).is_err());
+    gate.arm();
+    assert!(gate.check(1, 0).is_ok());
+    gate.disarm();
+    assert!(gate.check(0, 1).is_err());
+    assert!(gate.check(1, 1).is_err());
+    assert!(gate.check(0, 0).is_ok());
+}

@@ -1,5 +1,5 @@
 //! Small experimental PD policy. Units: degrees, degrees/s, signed duty percent.
-//! Positive pitch/rate -> positive physical-forward effort -> electrical (-u,+u).
+//! Positive pitch/rate -> positive physical-forward effort -> logical (u,u), with channel polarity applied by the driver.
 pub const KI: f32 = 0.0; // No integral state or automatic friction compensation.
 pub const ARM_ANGLE_DEG: f32 = 5.0;
 pub const ARM_RATE_DPS: f32 = 5.0;
@@ -53,7 +53,7 @@ pub fn pd(settings: Settings, pitch_deg: f32, rate_dps: f32) -> Option<i16> {
 }
 pub fn wheel_commands(forward_percent: i16) -> (i16, i16) {
     let u = forward_percent.clamp(-100, 100);
-    (-u, u) // A RIGHT, B LEFT; confirmed physical forward polarity.
+    (u, u) // A LEFT, B RIGHT: both request logical forward; driver inverts A once.
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

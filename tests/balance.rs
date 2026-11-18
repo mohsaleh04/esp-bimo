@@ -16,8 +16,8 @@ fn pd_and_physical_mapping_have_the_confirmed_feedback_sign() {
     assert!(pd(s, 2.0, 0.0).unwrap() > 0);
     assert!(pd(s, -2.0, 0.0).unwrap() < 0);
     assert!(pd(s, 0.0, 20.0).unwrap() > 0);
-    assert_eq!(wheel_commands(10), (-10, 10));
-    assert_eq!(wheel_commands(-10), (10, -10));
+    assert_eq!(wheel_commands(10), (10, 10));
+    assert_eq!(wheel_commands(-10), (-10, -10));
     assert_eq!(wheel_commands(0), (0, 0));
 }
 #[test]

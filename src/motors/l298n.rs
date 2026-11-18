@@ -1,4 +1,4 @@
-//! L298N enable PWM via MCPWM0, independent of the buzzer's LEDC timers.
+//! TB6612FNG bridge with owned STBY and MCPWM0; legacy L298n type name retained.
 use esp_hal::{
     delay::Delay,
     gpio::{NoPin, Output, interconnect::PeripheralOutput},
@@ -28,7 +28,7 @@ pub struct L298n {
 }
 
 impl L298n {
-    /// Fixed 10 kHz / 1000-count PWM. Starts stopped and disarmed.
+    /// Fixed requested 35 kHz / 1000-count PWM. Starts stopped and disarmed.
     pub fn new(peripheral: MCPWM0<'static>, mut pins: MotorOutputs, limit: DutyLimit) -> Self {
         pins.stop();
         let clock =
@@ -117,7 +117,7 @@ impl DualMotor for L298n {
         // percentage above the configured ceiling must not masquerade as output.
         if self.command_logging {
             log::info!(
-                "[MOTORS] requested A={} B={}; effective A={}% B={}%; MCPWM0 timer0 period={}, compare A={} B={}, active-high, 10 kHz",
+                "[MOTORS] requested A={} B={}; effective A={}% B={}%; MCPWM0 timer0 period={}, compare A={} B={}, active-high, requested 35 kHz",
                 requested.0,
                 requested.1,
                 a.duty_percent,
@@ -135,6 +135,7 @@ impl DualMotor for L298n {
         if b.duty_percent != 0 {
             MCPWM0::output_signal::<0, false>().connect_to(&self.pins.enb);
         }
+        self.pins.stby.set_high(); // Enable last, after PWM routing and direction setup.
         Ok(())
     }
 
@@ -160,6 +161,7 @@ impl Drop for L298n {
 
 impl MotorOutputs {
     pub(crate) fn stop(&mut self) {
+        self.stby.set_low(); // Hardware disable precedes all PWM/direction changes.
         // Write GPIO latches BEFORE switching the matrix away from PWM.
         self.ena.set_low();
         self.enb.set_low();

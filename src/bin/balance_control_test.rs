@@ -8,7 +8,7 @@ mod runtime;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 // Existing operator verification values are retained; the new rolling mode is unreviewed/off.
-const PHYSICAL_RESTRAINT_VERIFIED: bool = true;
+const PHYSICAL_RESTRAINT_VERIFIED: bool = false;
 const INDEPENDENT_POWER_CUTOFF_VERIFIED: bool = true;
 const SUPPLY_LIMITS_VERIFIED: bool = true;
 const SENSOR_FAULT_REVIEWED: bool = true;

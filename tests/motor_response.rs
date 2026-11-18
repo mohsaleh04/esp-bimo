@@ -98,7 +98,7 @@ fn arming_does_not_force_a_kick_requires_post_ready_neutral_then_request() {
     let o = r.sample(5.0, 0.0, true, 0.02, 560_000).unwrap();
     assert!(o.preview.kick_active);
     assert_eq!(o.preview.final_pwm, 70.0);
-    assert_eq!(wheel_commands(o.preview.final_pwm as i16), (-70, 70));
+    assert_eq!(wheel_commands(o.preview.final_pwm as i16), (70, 70));
 }
 #[test]
 fn zero_cancels_kick_and_reverse_preserves_electrical_signs() {

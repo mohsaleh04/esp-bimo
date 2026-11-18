@@ -28,6 +28,7 @@ pub struct Board {
 
 /// Initial inactive state. Move this entire owner into L298n; never recreate pins.
 pub struct MotorOutputs {
+    pub(crate) stby: Output<'static>,
     pub(crate) ena: Output<'static>,
     pub(crate) enb: Output<'static>,
     pub(crate) in1: Output<'static>,
@@ -42,6 +43,11 @@ impl Board {
         // Enables first. External pull-downs / hardware gating are required
         // for reset and pre-boot safety; software cannot provide that guarantee.
         let outputs = MotorOutputs {
+            stby: Output::new(
+                crate::motor_gpio!(p, stby),
+                Level::Low,
+                OutputConfig::default(),
+            ),
             ena: Output::new(
                 crate::motor_gpio!(p, pwma),
                 Level::Low,
