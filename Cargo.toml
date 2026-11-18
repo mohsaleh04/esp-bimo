@@ -11,6 +11,15 @@ path = "./src/bin/main.rs"
 
 [features]
 default = []
+tb6612-diagnostic = []
+# Fail-closed request: connected-motor activation needs current-limit review.
+tb6612-diagnostic-loaded = ["tb6612-diagnostic"]
+# Only with BOTH motors physically disconnected from all driver outputs.
+tb6612-diagnostic-no-load = ["tb6612-diagnostic"]
+# Request only: motor activation remains blocked pending hardware review.
+tb6612-diagnostic-motor-test = ["tb6612-diagnostic"]
+tb6612-live = []
+tb6612-both = ["tb6612-live"]
 motor-test = []
 motor-pwm-diagnostic = []
 motor-duty-characterization = []
@@ -138,3 +147,12 @@ required-features = ["motor-continuation-characterization"]
 [[bin]]
 name = "hardware_diagnostics"
 path = "src/bin/hardware_diagnostics.rs"
+
+[[bin]]
+name = "tb6612_diagnostics"
+path = "src/bin/tb6612_diagnostics.rs"
+
+[[bin]]
+name = "tb6612-diagnostic"
+path = "src/bin/tb6612_diagnostic.rs"
+required-features = ["tb6612-diagnostic"]
