@@ -119,3 +119,35 @@ to center. Timing varies deterministically. Chest touch interrupts this movement
 from the last commanded angle without a jump; repeated tickle events still do
 not queue. This supersedes the earlier statement that only chest starts motion.
 The standalone servo diagnostic does not instantiate Motion and remains one-shot.
+
+## Standalone HC-SR04 diagnostic
+
+From the repository root, use the ESP32-S3 USB Serial/JTAG connection:
+
+```sh
+cargo run --release --bin hc-sr04-diagnostic
+```
+
+The configured runner flashes with `espflash flash --monitor --chip esp32s3`.
+The diagnostic uses TRIG GPIO38 and ECHO GPIO47. Keep the Echo signal at
+3.3 V logic levels at the ESP32-S3 pin. GPIO40 (STBY) and all motor control
+outputs are driven LOW. The diagnostic leaves the servo pin untouched.
+
+Each ping reports the initial Echo level, the software-measured Trigger HIGH
+duration, the wait from Trigger LOW to Echo HIGH, and the Echo HIGH duration.
+Timing values are in microseconds. `None` denotes a phase that did not run.
+
+- `ECHO_STUCK_HIGH`: Echo was already HIGH before triggering, so the ping was skipped.
+- `WAIT_RISE_TIMEOUT`: no Echo HIGH observed before the 30 ms rise deadline.
+- `WAIT_FALL_TIMEOUT`: no Echo LOW observed before the 30 ms fall deadline.
+  `echo_high_us` is the elapsed wait when the deadline was detected.
+- `INVALID_PULSE`: both edges were observed, but the pulse width was outside
+  117–23,323 µs, corresponding to the nominal 20–4000 mm range at 343 m/s.
+
+Only a valid completed pulse produces `distance_mm`. The timings and outcome
+share a ping number and are printed after sampling. There is a 300 ms pause
+between attempts.
+
+```sh
+CARGO_ENCODED_RUSTFLAGS='' cargo +stable test --locked --manifest-path tests/orientation/Cargo.toml --target x86_64-unknown-linux-gnu --test hc-sr04
+```

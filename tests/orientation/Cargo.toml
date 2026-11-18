@@ -47,3 +47,7 @@ path = "../motor_continuation_characterization.rs"
 [features]
 balance-control-recovery-assist = []
 balance-control-short-recovery-zero = ["balance-control-recovery-assist"]
+
+[[test]]
+name = "hc-sr04"
+path = "../hc_sr04.rs"

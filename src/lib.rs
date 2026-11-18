@@ -17,3 +17,4 @@ pub mod eyes;
 
 pub mod head_servo;
 pub mod oled;
+pub mod hc_sr04;

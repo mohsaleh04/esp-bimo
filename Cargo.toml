@@ -161,3 +161,7 @@ path = "src/bin/tb6612_diagnostics.rs"
 name = "tb6612-diagnostic"
 path = "src/bin/tb6612_diagnostic.rs"
 required-features = ["tb6612-diagnostic"]
+
+[[bin]]
+name = "hc-sr04-diagnostic"
+path = "src/bin/hc_sr04_diagnostic.rs"
