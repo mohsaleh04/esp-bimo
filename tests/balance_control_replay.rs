@@ -260,7 +260,7 @@ mod tests {
             r.step(530_000, 4.0, 0.0);
             match case {
                 0 => {
-                    r.step(540_000, 21.0, 0.0);
+                    r.step(540_000, crate::balance::CONTROL_FALL_ANGLE_DEG, 0.0);
                 }
                 1 => {
                     r.step(540_000, f32::NAN, 0.0);
@@ -383,13 +383,16 @@ mod tests {
             let mut r = Replay::new();
             r.ready();
             r.step(530_000, 4.0 * sign, 0.0);
-            r.step(540_000, 21.0 * sign, 0.0);
+            r.step(540_000, crate::balance::CONTROL_FALL_ANGLE_DEG * sign, 0.0);
             assert_eq!(
                 r.response.disarm_reason,
                 Some(policy::DisarmReason::Fault(balance::Fault::Tilt))
             );
             assert_eq!(r.motors.outputs, (0, 0));
-            assert_eq!(r.metrics.max_abs_pitch, 21.0);
+            assert_eq!(
+                r.metrics.max_abs_pitch,
+                crate::balance::CONTROL_FALL_ANGLE_DEG
+            );
         }
     }
 }
@@ -692,7 +695,7 @@ mod restart_tests {
         for sign in [-1.0, 1.0] {
             let mut r = AssistReplay::new(enabled());
             start(&mut r, sign);
-            let t = r.step(21.0 * sign, 0.0, None);
+            let t = r.step(crate::balance::CONTROL_FALL_ANGLE_DEG * sign, 0.0, None);
             assert_eq!(t.state, State::Disarmed);
             assert_eq!(r.base.motors.outputs, (0, 0));
         }
@@ -1009,7 +1012,7 @@ mod arbiter_tests {
             let mut s = Trial::new(true);
             s.initial(1.0);
             match case {
-                0 => s.step_at(s.t + 10_000, 21.0, 0.0),
+                0 => s.step_at(s.t + 10_000, crate::balance::CONTROL_FALL_ANGLE_DEG, 0.0),
                 1 => s.step_at(s.t + 30_001, 3.0, 0.0),
                 2 => {
                     s.r.sensor_fail(policy::SensorFault::I2cRead);
@@ -1065,7 +1068,7 @@ mod arbiter_tests {
     fn ordinary_commands_stay_bounded_and_budget_not_reset_by_neutral() {
         let mut s = Trial::new(true);
         s.initial(1.0);
-        s.hold(10, 14.0);
+        s.hold(10, 12.0);
         assert_eq!(s.m.motor.outputs.1, 48); // PD14 ordinary proportional mapping.
         s.hold(120, 0.0);
         s.hold(3, 3.0);

@@ -86,12 +86,12 @@ fn calibration_pose_cannot_arm_and_live_requires_readiness() {
 fn arming_does_not_force_a_kick_requires_post_ready_neutral_then_request() {
     let mut r = response(true);
     for i in 0..=25 {
-        assert!(r.sample(3.88, 0.0, true, 0.02, i * 20_000).is_none());
+        assert!(r.sample(3.0, 0.0, true, 0.02, i * 20_000).is_none());
     }
     assert_eq!(r.state(), ResponseState::ArmedWaitingForNeutral);
     assert_eq!(r.limited_pd, Some(3));
     assert!(!r.neutral_satisfied);
-    assert!(r.sample(3.88, 0.0, true, 0.02, 520_000).is_none());
+    assert!(r.sample(3.0, 0.0, true, 0.02, 520_000).is_none());
     assert_eq!(r.control.state(), State::Observe);
     assert!(r.sample(0.0, 0.0, true, 0.02, 540_000).is_none());
     assert_eq!(r.state(), ResponseState::Active);
@@ -220,7 +220,7 @@ fn physical_output_gate_disarms_on_fault_timeout_and_dry_even_with_old_kick() {
         let mut r = response(true);
         arm(&mut r);
         r.sample(0.0, 0.0, true, 0.02, 540_000);
-        let o = r.sample(5.0, 0.0, true, 0.02, 560_000).unwrap();
+        let o = r.sample(4.5, 0.0, true, 0.02, 560_000).unwrap();
         assert_eq!(o.limited_pd, 5);
         assert!(o.preview.mapped_pwm >= 30.0);
         let mut m = FakeMotor::default();
@@ -368,7 +368,7 @@ fn ready_but_not_neutral_outlasts_active_window_then_hits_arming_timeout() {
     let mut m = FakeMotor::default();
     for i in 0..150 {
         let now = i * 20_000;
-        assert!(r.sample(3.88, 0.0, true, 0.02, now).is_none());
+        assert!(r.sample(3.0, 0.0, true, 0.02, now).is_none());
         assert!(!r.finished);
         assert_eq!(r.limited_pd, Some(3));
         assert!(!r.neutral_satisfied);

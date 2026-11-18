@@ -213,7 +213,7 @@ fn faults_in_pending_recovery_permanently_zero_proposals() {
         let t = if condition == 0 { 950_001 } else { 930_000 };
         let mut i = input(t, 6.6, 5.0);
         match condition {
-            1 => i.pitch = 21.0,
+            1 => i.pitch = crate::balance::CONTROL_FALL_ANGLE_DEG,
             2 => i.sample_us = t - 40_001,
             3 => i.fault = Some(restart_assist::Fault::Sensor),
             4 => i.active = false,
@@ -349,7 +349,7 @@ fn integrated_faults_during_zero_or_pulse_permanently_stop_real_interface() {
             s.at(
                 t,
                 if condition == 5 {
-                    21.0
+                    crate::balance::CONTROL_FALL_ANGLE_DEG
                 } else if condition == 6 {
                     f32::NAN
                 } else {
@@ -807,7 +807,15 @@ fn probe_cap_reached_mid_probe_skips_remaining_wait_and_can_cancel() {
             assert_eq!(o.commanded_pwm, 0.0);
             assert_eq!(o.recovery.unwrap().phase, Phase::ZeroWait);
             assert_eq!(o.recovery.unwrap().reason, Some(Reason::ProbeCapped));
-            let mut i = input(730_000, if fault { 21.0 } else { 0.0 }, 0.0);
+            let mut i = input(
+                730_000,
+                if fault {
+                    crate::balance::CONTROL_FALL_ANGLE_DEG
+                } else {
+                    0.0
+                },
+                0.0,
+            );
             if fault {
                 i.mapped_pwm = 50.0;
             }
@@ -847,7 +855,16 @@ fn capped_probe_integrated_zero_wait_and_fault_stop_actual_motor_interface() {
             assert_eq!(s.m.outputs, (0, 0));
             assert_eq!(s.g.kicks(s.now), 1);
         }
-        s.at(s.now + 10_000, if fault { 21.0 } else { 0.0 }, 0.0, true);
+        s.at(
+            s.now + 10_000,
+            if fault {
+                crate::balance::CONTROL_FALL_ANGLE_DEG
+            } else {
+                0.0
+            },
+            0.0,
+            true,
+        );
         assert_eq!(s.m.outputs, (0, 0));
         assert_eq!(s.g.kicks(s.now), 1);
         if !fault {
@@ -981,7 +998,12 @@ fn short_recovery_zero_cancellation_and_faults_never_complete_a_pending_kick() {
         assert_eq!(s.m.outputs, (0, 0));
         match condition {
             0 => s.at(s.now + 10_000, 0.0, 0.0, true),
-            1 => s.at(s.now + 10_000, 21.0, 5.0, true),
+            1 => s.at(
+                s.now + 10_000,
+                crate::balance::CONTROL_FALL_ANGLE_DEG,
+                5.0,
+                true,
+            ),
             2 => {
                 s.r.sensor_fail(policy::SensorFault::I2cRead);
                 s.at(s.now + 10_000, 15.6, 5.0, true);
