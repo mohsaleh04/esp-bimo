@@ -99,7 +99,10 @@ async fn main(_spawner: Spawner) -> ! {
     info!(
         "STATIC MOTOR TEST: starting B (RIGHT wheel), ENB/IN3 HIGH, IN4 LOW; A disabled; 250 ms target."
     );
-    motors.in3.set_high();
+    let (first, second) = esp_bimo::motors::control::Channel::B
+        .direction_inputs(esp_bimo::motors::control::Direction::Positive);
+    motors.in3.set_level(first.into());
+    motors.in4.set_level(second.into());
     // Software timing, not a hardware cutoff against CPU failure or
     // excessive interrupt latency. Set direction before enabling the bridge.
     let deadline = Instant::now() + Duration::from_millis(1000);

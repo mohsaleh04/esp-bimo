@@ -65,3 +65,17 @@ fn diagnostic_limit_and_effective_pwm_duty_agree() {
     assert_eq!(limit.map(0).direction, Direction::Stopped);
     assert_eq!(limit.map(0).duty_percent, 0);
 }
+
+#[test]
+fn bridge_direction_inverts_a_once_and_preserves_b_and_stop() {
+    use control::Channel;
+
+    for (direction, a, b) in [
+        (Direction::Positive, (false, true), (true, false)),
+        (Direction::Negative, (true, false), (false, true)),
+        (Direction::Stopped, (false, false), (false, false)),
+    ] {
+        assert_eq!(Channel::A.direction_inputs(direction), a);
+        assert_eq!(Channel::B.direction_inputs(direction), b);
+    }
+}

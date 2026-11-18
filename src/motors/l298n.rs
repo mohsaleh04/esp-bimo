@@ -11,7 +11,7 @@ use esp_hal::{
     time::Rate,
 };
 
-use super::control::{CommandGate, Direction};
+use super::control::{Channel, CommandGate, Direction};
 use super::{Disarmed, DualMotor, DutyLimit};
 use crate::board::MotorOutputs;
 
@@ -68,8 +68,13 @@ impl L298n {
         self.command_logging = enabled;
     }
 
-    fn direction(first: &mut Output<'_>, second: &mut Output<'_>, direction: Direction) {
-        let (a, b) = direction.inputs();
+    fn direction(
+        first: &mut Output<'_>,
+        second: &mut Output<'_>,
+        channel: Channel,
+        direction: Direction,
+    ) {
+        let (a, b) = channel.direction_inputs(direction);
         first.set_level(a.into());
         second.set_level(b.into());
     }
@@ -94,8 +99,18 @@ impl DualMotor for L298n {
 
         // Break before make on every command, including polarity reversals.
         Delay::new().delay_millis(1);
-        Self::direction(&mut self.pins.in1, &mut self.pins.in2, a.direction);
-        Self::direction(&mut self.pins.in3, &mut self.pins.in4, b.direction);
+        Self::direction(
+            &mut self.pins.in1,
+            &mut self.pins.in2,
+            Channel::A,
+            a.direction,
+        );
+        Self::direction(
+            &mut self.pins.in3,
+            &mut self.pins.in4,
+            Channel::B,
+            b.direction,
+        );
         self.a.set_timestamp(a.duty_percent as u16 * 10);
         self.b.set_timestamp(b.duty_percent as u16 * 10);
         // Report effective duty while enables are still detached. A requested

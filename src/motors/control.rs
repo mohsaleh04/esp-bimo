@@ -17,6 +17,28 @@ impl Direction {
     }
 }
 
+/// Applies wiring polarity once, when a logical direction is sent to the bridge.
+#[derive(Clone, Copy)]
+pub enum Channel {
+    A,
+    B,
+}
+
+impl Channel {
+    pub const fn invert_direction(self) -> bool {
+        matches!(self, Self::A)
+    }
+
+    pub const fn direction_inputs(self, direction: Direction) -> (bool, bool) {
+        let (first, second) = direction.inputs();
+        if self.invert_direction() {
+            (second, first)
+        } else {
+            (first, second)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Drive {
     pub direction: Direction,
@@ -76,7 +98,7 @@ impl CommandGate {
 }
 
 /// Common interface for L298N and future bridge implementations.
-/// Positive/negative are electrical polarity; physical forward is uncalibrated.
+/// Positive/negative request logical forward/reverse. Drivers apply wiring polarity.
 pub trait DualMotor {
     fn arm(&mut self);
     fn command(&mut self, a: i16, b: i16) -> Result<(), Disarmed>;
