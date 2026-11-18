@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 use esp_backtrace as _;
+use esp_bimo::oled::Oled;
 use esp_hal::{
     analog::adc::{Adc, AdcConfig, Attenuation},
     delay::Delay,
@@ -17,57 +18,19 @@ use esp_hal::{
     time::Rate,
 };
 use log::{info, warn};
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 // Four-wire SPI mode 0, MSB first. Dedicated GPIO ownership; no shared bus.
-struct Oled {
-    clk: Output<'static>,
-    mosi: Output<'static>,
-    cs: Output<'static>,
-    dc: Output<'static>,
-}
-impl Oled {
-    fn send(&mut self, data: bool, bytes: &[u8]) {
-        self.dc
-            .set_level(if data { Level::High } else { Level::Low });
-        self.cs.set_low();
-        let delay = Delay::new();
-        for byte in bytes {
-            for bit in (0..8).rev() {
-                self.mosi.set_level(if byte & (1 << bit) != 0 {
-                    Level::High
-                } else {
-                    Level::Low
-                });
-                delay.delay_micros(1);
-                self.clk.set_high();
-                delay.delay_micros(1);
-                self.clk.set_low();
-            }
-        }
-        self.cs.set_high();
-    }
-    fn eyes(&mut self) {
-        self.send(
-            false,
-            &[
-                0xae, 0xd5, 0x80, 0xa8, 63, 0xd3, 0, 0x40, 0x8d, 0x14, 0x20, 0, 0xa1, 0xc8, 0xda,
-                0x12, 0x81, 0x7f, 0xd9, 0xf1, 0xdb, 0x40, 0xa4, 0xa6,
-            ],
-        );
-        self.send(false, &[0x21, 0, 127, 0x22, 0, 7]);
-        self.send(false, &[0xaf]);
-    }
-    fn render(&mut self, pose: esp_bimo::eyes::Pose) {
-        self.send(false, &[0x21, 0, 127, 0x22, 0, 7]);
-        self.send(true, &esp_bimo::eyes::render(pose));
-    }
-}
 
 #[esp_hal::main]
 fn main() -> ! {
     let p = esp_hal::init(esp_hal::Config::default());
-    let _stby = Output::new(esp_bimo::motor_gpio!(p, stby), Level::Low, OutputConfig::default());
+    let _stby = Output::new(
+        esp_bimo::motor_gpio!(p, stby),
+        Level::Low,
+        OutputConfig::default(),
+    );
     macro_rules! low {
         ($pin:expr) => {
             Output::new($pin, Level::Low, OutputConfig::default())
@@ -81,8 +44,28 @@ fn main() -> ! {
         low!(esp_bimo::motor_gpio!(p, pwma)),
         low!(esp_bimo::motor_gpio!(p, pwmb)),
     );
-    // GPIO18/48 remain untouched. Do not construct Board or a motor/servo driver.
+    // GPIO48 remains untouched; wheel outputs never connect to PWM.
     esp_println::logger::init_logger_from_env();
+    // Dedicated MCPWM1 avoids all four LEDC timers used by the buzzer.
+    use esp_hal::mcpwm::{
+        McPwm, PeripheralClockConfig, operator::PwmPinConfig, timer::PwmWorkingMode,
+    };
+    let servo_clock =
+        PeripheralClockConfig::with_frequency(Rate::from_mhz(1)).expect("servo clock");
+    let mut servo_pwm = McPwm::new(p.MCPWM1, servo_clock);
+    servo_pwm.operator0.set_timer(&servo_pwm.timer0);
+    let mut servo_pin = servo_pwm
+        .operator0
+        .with_pin_a(p.GPIO18, PwmPinConfig::UP_ACTIVE_HIGH);
+    servo_pin.set_timestamp(esp_bimo::head_servo::pulse_us(90) as u16);
+    let servo_timer = servo_clock
+        .timer_clock_with_frequency(19999, PwmWorkingMode::Increase, Rate::from_hz(50))
+        .expect("servo 50Hz");
+    servo_pwm.timer0.start(servo_timer);
+    let mut head_motion = esp_bimo::head_servo::Motion::new();
+    info!(
+        "Head servo: GPIO18 MCPWM1 50Hz center=90/1500us; center PWM held at idle; supply unmeasured"
+    );
     // Existing board wiring: active-low buzzer on GPIO21. PWM runs in hardware.
     let buzzer_pin = Output::new(p.GPIO21, Level::High, OutputConfig::default());
     let mut ledc = Ledc::new(p.LEDC);
@@ -189,7 +172,7 @@ fn main() -> ! {
     let mut ir = cfg.enable_pin(p.GPIO1, Attenuation::_11dB);
     let mut adc = Adc::new(p.ADC1, cfg);
     info!(
-        "Hardware diagnostics: STBY LOW; motors DISARMED; servo unused; USB Serial/JTAG GPIO19/20 only"
+        "Hardware diagnostics: STBY LOW; motors DISARMED; servo holds center; USB Serial/JTAG GPIO19/20 only"
     );
     let mut previous = (head.is_high(), chest.is_high(), tilt.is_high());
     info!("initial head/chest/tilt raw={previous:?}");
@@ -250,6 +233,7 @@ fn main() -> ! {
                 info!("touch chest debounced={high}");
                 if high {
                     eyes.trigger(esp_bimo::eyes::Event::Chest, ms);
+                    head_motion.trigger(ms);
                     sound = &GIGGLE;
                     gentle = false;
                     sound_step = 0;
@@ -277,6 +261,9 @@ fn main() -> ! {
                 sound_step += 1;
                 sound_due = ms + duration;
                 // Last sequence entry is a rest, leaving GPIO21 HIGH indefinitely.
+            }
+            if let Some(angle) = head_motion.update(ms) {
+                servo_pin.set_timestamp(esp_bimo::head_servo::pulse_us(angle) as u16);
             }
             let pose = eyes.update(ms);
             if echo_phase != 0 {
@@ -321,7 +308,7 @@ fn main() -> ! {
             sound_due = Instant::now().duration_since_epoch().as_millis();
             eyes.trigger(esp_bimo::eyes::Event::Lifted, sound_due);
             warn!(
-                "IR saturation: possible lifted; surprised eye wobble and unusual sound triggered; servo unused"
+                "IR saturation: possible lifted; surprised eye wobble and unusual sound triggered; servo holds center"
             );
         }
         if ir_latched && ir_low_count >= 2 {

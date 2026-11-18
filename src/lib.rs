@@ -14,3 +14,6 @@ pub mod balance;
 pub mod pwm_mapping;
 
 pub mod eyes;
+
+pub mod head_servo;
+pub mod oled;

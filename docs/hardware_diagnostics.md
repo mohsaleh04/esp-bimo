@@ -84,3 +84,38 @@ The detector rearms only after two readings below 3900; sustained saturation
 cannot loop the sound. ADC saturation alone does not prove physical lifting:
 validate this heuristic against the installed sensor. New touch events may
 interrupt the reaction. GPIO18 servo remains uninitialized; STBY stays LOW.
+
+## Chest-triggered head servo (supersedes earlier servo-unused notes)
+
+GPIO18 now drives a position-controlled head servo at boot center (1500us).
+Dedicated MCPWM1 timer0/operator0A generates 50Hz with 1us timestamps; buzzer
+LEDC resources and wheel MCPWM0 remain untouched. GPIO48 is still unused.
+`src/head_servo.rs` shares pulse calibration with `servo_diagnostics` and provides
+a nonblocking 90->80->100->90 trajectory, one degree per >=15ms (~0.6s plus
+loop/SPI/logging delays). Only debounced chest rising edges trigger motion;
+head touch and IR do not. Busy triggers are ignored without queuing. Existing
+chest eye/audio effects are unchanged and can restart independently.
+
+PWM stays active at center after completion, providing a continued position
+command (not a guarantee of position/torque). The initial physical position is
+unknown: first center command may move abruptly; software cannot ramp from an
+unmeasured position. Invalid trajectory angles terminate motion and command
+center. No position/stall/current/supply feedback is available. An invalid clock
+configuration fails before starting movement. External regulated 5V and shared
+ground are required; supply health is not measured or guaranteed.
+
+Adjust CENTER_DEG, LEFT_SIGN, OFFSET_DEG, MIN_PULSE_US/MAX_PULSE_US in
+`head_servo.rs`; physical angle and endpoints remain uncalibrated. The standalone
+servo test retains its one-shot sequence and final PWM shutdown; only its pulse
+mapping/constants are imported from the shared module. No physical validation
+of this combined firmware has been performed.
+
+### Occasional idle head movement
+
+The combined diagnostic now also commands an idle head glance: first at ~25s
+monotonic uptime, then 20–30s after each completed head motion. It alternates
+left/right by five logical degrees, steps at 60ms/degree, holds 350ms and returns
+to center. Timing varies deterministically. Chest touch interrupts this movement
+from the last commanded angle without a jump; repeated tickle events still do
+not queue. This supersedes the earlier statement that only chest starts motion.
+The standalone servo diagnostic does not instantiate Motion and remains one-shot.

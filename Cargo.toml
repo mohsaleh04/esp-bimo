@@ -20,6 +20,7 @@ tb6612-diagnostic-no-load = ["tb6612-diagnostic"]
 tb6612-diagnostic-motor-test = ["tb6612-diagnostic"]
 tb6612-live = []
 tb6612-both = ["tb6612-live"]
+servo-full-sweep = []
 motor-test = []
 motor-pwm-diagnostic = []
 motor-duty-characterization = []
@@ -147,6 +148,10 @@ required-features = ["motor-continuation-characterization"]
 [[bin]]
 name = "hardware_diagnostics"
 path = "src/bin/hardware_diagnostics.rs"
+
+[[bin]]
+name = "servo_diagnostics"
+path = "src/bin/servo_diagnostics.rs"
 
 [[bin]]
 name = "tb6612_diagnostics"
