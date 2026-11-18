@@ -67,19 +67,19 @@ impl Oled {
 #[esp_hal::main]
 fn main() -> ! {
     let p = esp_hal::init(esp_hal::Config::default());
-    let _stby = Output::new(p.GPIO40, Level::Low, OutputConfig::default());
+    let _stby = Output::new(esp_bimo::motor_gpio!(p, stby), Level::Low, OutputConfig::default());
     macro_rules! low {
         ($pin:expr) => {
             Output::new($pin, Level::Low, OutputConfig::default())
         };
     }
     let _motor_pins = (
-        low!(p.GPIO5),
-        low!(p.GPIO6),
-        low!(p.GPIO7),
-        low!(p.GPIO15),
-        low!(p.GPIO16),
-        low!(p.GPIO17),
+        low!(esp_bimo::motor_gpio!(p, ain1)),
+        low!(esp_bimo::motor_gpio!(p, ain2)),
+        low!(esp_bimo::motor_gpio!(p, bin1)),
+        low!(esp_bimo::motor_gpio!(p, bin2)),
+        low!(esp_bimo::motor_gpio!(p, pwma)),
+        low!(esp_bimo::motor_gpio!(p, pwmb)),
     );
     // GPIO18/48 remain untouched. Do not construct Board or a motor/servo driver.
     esp_println::logger::init_logger_from_env();

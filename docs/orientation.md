@@ -22,7 +22,7 @@ specified by the [Bosch BMI160 datasheet](https://www.bosch-sensortec.com/media/
 
 The repository does **not** establish the sensor's physical mounting axes.
 An old static gravity vector alone cannot identify robot-forward or the wheel
-axle. No X/Y/Z axis is hard-coded as pitch. A=RIGHT and B=LEFT wheel observations
+axle. No X/Y/Z axis is hard-coded as pitch. Historical L298N A=RIGHT and B=LEFT wheel observations
 do not determine the IMU axes.
 
 ## Guided experiment: learn the physical pitch axis

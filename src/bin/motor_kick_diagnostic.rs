@@ -61,7 +61,7 @@ async fn main(_spawner: Spawner) -> ! {
             "TEST BLOCKED: invalid settings or duty above ceiling; edit source only after supply/safety verification. No automatic clamping."
         );
     } else {
-        'tests: for (right, name) in [(true, "A / RIGHT"), (false, "B / LEFT")] {
+        'tests: for (right, name) in [(true, "A / LEFT"), (false, "B / RIGHT")] {
             for trial in 1..=TEST.repetitions {
                 for (phase, duration_ms) in TEST.phases() {
                     // Log kick BEFORE enabling; switch to hold/stop BEFORE logging.

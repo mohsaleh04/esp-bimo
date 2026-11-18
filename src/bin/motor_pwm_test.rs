@@ -25,11 +25,18 @@ async fn main(_spawner: Spawner) -> ! {
     let limit = DutyLimit::new(100);
     let effective = limit.map(100);
     assert_eq!(effective.duty_percent, 100, "100% must not be clamped");
-    assert_eq!(effective.direction.inputs(), (true, false)); // IN1 HIGH, IN2 LOW
+    assert_eq!(effective.direction.inputs(), (true, false)); // Logical positive before channel wiring polarity.
     let mut motors = L298n::new(board.motor_pwm, board.motor_outputs, limit);
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
     let timg0 = TimerGroup::new(board.timer_group);
     esp_rtos::start(timg0.timer0, board.rtos_interrupt);
+
+    if !esp_bimo::motor_gpio::LEGACY_MOTOR_PROBES_LIVE {
+        log::warn!("DRY: legacy motor probe locked out during TB6612 wiring verification");
+        loop {
+            Timer::after_secs(1).await;
+        }
+    }
 
     info!("PWM DIAGNOSTIC: waiting 3 seconds; both motors disarmed.");
     Timer::after_secs(3).await;
@@ -38,7 +45,7 @@ async fn main(_spawner: Spawner) -> ! {
     // clamping, so the LOW compare event never occurs: constant HIGH after TEZ.
     // command() logs actual period/compare readback BEFORE enabling ENA.
     info!(
-        "PWM DIAGNOSTIC: A=RIGHT GPIO16, requested=100%, effective={}%; IN1 HIGH/IN2 LOW; B disabled; 149 ms target (<150 ms).",
+        "PWM DIAGNOSTIC: A=LEFT reverse, B=RIGHT forward, requested=100%, effective={}% per channel.",
         effective.duty_percent,
     );
     motors.arm();

@@ -48,12 +48,36 @@ async fn main(_spawner: Spawner) -> ! {
     // Own each pin directly from initialization through permanent lockout.
     // No Board/L298n/MCPWM initialization or pin handoff in this diagnostic.
     let mut motors = TestOutputs {
-        ena: Output::new(p.GPIO16, Level::Low, OutputConfig::default()),
-        enb: Output::new(p.GPIO17, Level::Low, OutputConfig::default()),
-        in1: Output::new(p.GPIO5, Level::Low, OutputConfig::default()),
-        in2: Output::new(p.GPIO6, Level::Low, OutputConfig::default()),
-        in3: Output::new(p.GPIO7, Level::Low, OutputConfig::default()),
-        in4: Output::new(p.GPIO15, Level::Low, OutputConfig::default()),
+        ena: Output::new(
+            esp_bimo::motor_gpio!(p, pwma),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        enb: Output::new(
+            esp_bimo::motor_gpio!(p, pwmb),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        in1: Output::new(
+            esp_bimo::motor_gpio!(p, ain1),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        in2: Output::new(
+            esp_bimo::motor_gpio!(p, ain2),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        in3: Output::new(
+            esp_bimo::motor_gpio!(p, bin1),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        in4: Output::new(
+            esp_bimo::motor_gpio!(p, bin2),
+            Level::Low,
+            OutputConfig::default(),
+        ),
     };
     motors.ena.disconnect_from_peripheral_output();
     motors.enb.disconnect_from_peripheral_output();
@@ -63,10 +87,17 @@ async fn main(_spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(p.TIMG0);
     esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
 
+    if !esp_bimo::motor_gpio::LEGACY_MOTOR_PROBES_LIVE {
+        log::warn!("DRY: legacy motor probe locked out during TB6612 wiring verification");
+        loop {
+            Timer::after_secs(1).await;
+        }
+    }
+
     info!("STATIC MOTOR TEST: waiting 3 seconds; all six outputs LOW.");
     Timer::after_secs(3).await;
     info!(
-        "STATIC MOTOR TEST: starting B (LEFT wheel), ENB/IN3 HIGH, IN4 LOW; A disabled; 250 ms target."
+        "STATIC MOTOR TEST: starting B (RIGHT wheel), ENB/IN3 HIGH, IN4 LOW; A disabled; 250 ms target."
     );
     motors.in3.set_high();
     // Software timing, not a hardware cutoff against CPU failure or

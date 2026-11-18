@@ -1,4 +1,6 @@
-# MCPWM diagnostic: A / RIGHT wheel
+# Historical MCPWM diagnostic with the previous L298N wiring
+
+The GPIO and wheel observations below refer to the previous wiring. The current TB6612 map is in `motor_gpio.rs`.
 
 Both static enable-HIGH tests rotated their respective motors: A (GPIO16) is
 RIGHT, B (GPIO17) is LEFT. Physical forward/reverse is still uncalibrated.

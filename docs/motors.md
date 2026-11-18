@@ -10,8 +10,8 @@ active-low buzzer are preserved.
 
 | Electrical channel | Enable PWM | Input pair | Positive command | Negative command |
 | --- | --- | --- | --- | --- |
-| A | GPIO16 / ENA | GPIO5 / IN1, GPIO6 / IN2 | HIGH, LOW | LOW, HIGH |
-| B | GPIO17 / ENB | GPIO7 / IN3, GPIO15 / IN4 | HIGH, LOW | LOW, HIGH |
+| A | GPIO17 / ENA | GPIO15 / IN1, GPIO16 / IN2 | HIGH, LOW | LOW, HIGH |
+| B | GPIO5 / ENB | GPIO7 / IN3, GPIO6 / IN4 | HIGH, LOW | LOW, HIGH |
 
 A/B do not mean left/right. Positive/negative do not yet mean robot
 forward/reverse. Those relationships must be observed with wheels off the ground.
@@ -197,3 +197,5 @@ validation/clamping, signed extremes, and gate behavior. They do not validate GP
 stopping under electrical faults, or the actual motors.
 Those remain explicit, pending real-hardware checks. Target builds and HAL
 source inspection support the ownership/routing design, not hardware proof.
+
+The legacy static and MCPWM probes are DRY during TB6612 wiring verification. A=LEFT and B=RIGHT are the intended TB6612 labels, pending physical confirmation.

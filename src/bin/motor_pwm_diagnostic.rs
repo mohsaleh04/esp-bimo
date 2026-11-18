@@ -127,11 +127,18 @@ async fn main(_spawner: Spawner) -> ! {
     );
     Timer::after_secs(STARTUP_DELAY_SECS).await;
 
-    if test_motor(&mut motors, "A / RIGHT", true, RUNNING_START_A_PERCENT).await {
+    if !esp_bimo::motor_gpio::LEGACY_MOTOR_PROBES_LIVE {
+        log::warn!("DRY: legacy motor probe locked out during TB6612 wiring verification");
+        loop {
+            Timer::after_secs(1).await;
+        }
+    }
+
+    if test_motor(&mut motors, "A / LEFT", true, RUNNING_START_A_PERCENT).await {
         motors.disarm();
         info!("A complete; both motors disabled for {BETWEEN_MOTORS_MS}ms before B.");
         Timer::after_millis(BETWEEN_MOTORS_MS).await;
-        if !test_motor(&mut motors, "B / LEFT", false, RUNNING_START_B_PERCENT).await {
+        if !test_motor(&mut motors, "B / RIGHT", false, RUNNING_START_B_PERCENT).await {
             warn!("B command rejected; diagnostic aborted.");
         }
     } else {

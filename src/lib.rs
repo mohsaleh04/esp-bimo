@@ -4,6 +4,7 @@ pub mod board;
 pub mod buzzer;
 pub mod sensors;
 
+pub mod motor_gpio;
 pub mod motors;
 
 pub mod orientation;

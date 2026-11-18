@@ -42,12 +42,36 @@ impl Board {
         // Enables first. External pull-downs / hardware gating are required
         // for reset and pre-boot safety; software cannot provide that guarantee.
         let outputs = MotorOutputs {
-            ena: Output::new(p.GPIO16, Level::Low, OutputConfig::default()),
-            enb: Output::new(p.GPIO17, Level::Low, OutputConfig::default()),
-            in1: Output::new(p.GPIO5, Level::Low, OutputConfig::default()),
-            in2: Output::new(p.GPIO6, Level::Low, OutputConfig::default()),
-            in3: Output::new(p.GPIO7, Level::Low, OutputConfig::default()),
-            in4: Output::new(p.GPIO15, Level::Low, OutputConfig::default()),
+            ena: Output::new(
+                crate::motor_gpio!(p, pwma),
+                Level::Low,
+                OutputConfig::default(),
+            ),
+            enb: Output::new(
+                crate::motor_gpio!(p, pwmb),
+                Level::Low,
+                OutputConfig::default(),
+            ),
+            in1: Output::new(
+                crate::motor_gpio!(p, ain1),
+                Level::Low,
+                OutputConfig::default(),
+            ),
+            in2: Output::new(
+                crate::motor_gpio!(p, ain2),
+                Level::Low,
+                OutputConfig::default(),
+            ),
+            in3: Output::new(
+                crate::motor_gpio!(p, bin1),
+                Level::Low,
+                OutputConfig::default(),
+            ),
+            in4: Output::new(
+                crate::motor_gpio!(p, bin2),
+                Level::Low,
+                OutputConfig::default(),
+            ),
         };
         let buzzer = Output::new(p.GPIO21, Level::High, OutputConfig::default());
         let i2c = I2c::new(
