@@ -266,7 +266,7 @@ fn recovering_credit_does_not_fire_a_held_request_even_during_reversal_zero() {
     assert!(!t.applied);
     s.hold(110, 3.0);
     assert_eq!(s.history.len(), 2);
-    assert_eq!(s.m.outputs, (-31, 31));
+    assert_eq!(s.m.outputs, (31, 31));
     assert_eq!(
         s.g.trace(s.now).unwrap().suppressed,
         Some(Reason::FreshRequestRequired)
@@ -310,7 +310,7 @@ fn sustained_stall_like_nonzero_demand_never_generates_periodic_assists() {
     let t = s.g.trace(s.now).unwrap();
     assert_eq!(t.pulses_remaining, 2);
     assert!(!t.applied);
-    assert_eq!(s.m.outputs, (-31, 31)); // No claim that the real motor would move.
+    assert_eq!(s.m.outputs, (31, 31)); // No claim that the real motor would move.
 }
 #[test]
 fn shared_reversal_guard_still_requires_100ms_before_recovered_assist() {
@@ -326,7 +326,7 @@ fn shared_reversal_guard_still_requires_100ms_before_recovered_assist() {
     }
     s.step(-3.0);
     assert_eq!(s.now - zero, 100_000);
-    assert_eq!(s.m.outputs, (65, -65));
+    assert_eq!(s.m.outputs, (-65, -65));
 }
 fn input(t: u64, pd: i16) -> Input {
     Input {
@@ -452,7 +452,7 @@ fn recovery_during_a_new_reversal_cannot_turn_the_denied_held_request_into_assis
     s.two_short_pulses();
     let recovery = s.history[0].end.unwrap() + WINDOW_US;
     s.until(recovery - 50_000, -3.0);
-    assert_eq!(s.m.outputs, (31, -31));
+    assert_eq!(s.m.outputs, (-31, -31));
     s.step(3.0);
     assert_eq!(s.m.outputs, (0, 0));
     s.until(recovery, 3.0);
@@ -462,12 +462,12 @@ fn recovery_during_a_new_reversal_cannot_turn_the_denied_held_request_into_assis
     assert!(!t.applied);
     assert!(t.fresh_request_required);
     assert_eq!(s.history.len(), 2);
-    assert_eq!(s.m.outputs, (-31, 31));
+    assert_eq!(s.m.outputs, (31, 31));
 }
 
 #[test]
 fn rolling_assist_uses_robot_direction_for_requested_and_applied_duty() {
-    for (pd, expected, motors) in [(3.0_f32, 70.0, (-70, 70)), (-3.0, -65.0, (65, -65))] {
+    for (pd, expected, motors) in [(3.0_f32, 70.0, (70, 70)), (-3.0, -65.0, (-65, -65))] {
         let mut s = Trial::new();
         s.start(pd.signum());
         let t = s.g.trace(s.now).unwrap();

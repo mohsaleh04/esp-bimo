@@ -301,7 +301,7 @@ fn integrated_recovery_uses_actual_zero_interface_and_shared_ledger() {
         }
         if o.recovery.unwrap().phase == restart_assist::recovery::Phase::Pulse {
             applied.get_or_insert(t);
-            assert_eq!(s.m.outputs, (-70, 70));
+            assert_eq!(s.m.outputs, (70, 70));
         }
     }
     let required = if cfg!(feature = "balance-control-short-recovery-zero") {

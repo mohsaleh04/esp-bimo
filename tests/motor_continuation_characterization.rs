@@ -46,7 +46,7 @@ fn six_stages_startup_then_hold_preserve_polarity_and_stop() {
         assert_eq!(hold, [50, 40, 30][index % 3]);
         let sign = if forward { 1 } else { -1 };
         for (phase, duty) in [(Phase::Startup, startup), (Phase::Hold, hold)] {
-            let expected = (-sign * i16::from(duty), sign * i16::from(duty));
+            let expected = (sign * i16::from(duty), sign * i16::from(duty));
             assert_eq!(sequence::apply(&mut m, index, phase, true, 0), Ok(expected));
             assert_eq!(m.outputs, expected);
         }
@@ -68,7 +68,7 @@ fn dry_timeout_bad_stage_and_driver_failures_stop_both_outputs() {
         ] {
             let mut m = Motor {
                 armed: true,
-                outputs: (-50, 50),
+                outputs: (50, 50),
                 fail,
                 ..Default::default()
             };
@@ -100,9 +100,9 @@ fn timing_and_independent_default_off_source_authorization() {
 fn timeout_boundary_cancels_an_ongoing_startup_before_hold() {
     let mut m = Motor::default();
     sequence::apply(&mut m, 0, Phase::Startup, true, sequence::TOTAL_MS - 1).unwrap();
-    assert_eq!(m.outputs, (-70, 70));
+    assert_eq!(m.outputs, (70, 70));
     assert!(sequence::apply(&mut m, 0, Phase::Hold, true, sequence::TOTAL_MS).is_err());
     assert_eq!(m.outputs, (0, 0));
     assert!(!m.armed);
-    assert_eq!(m.history, vec![(-70, 70)]);
+    assert_eq!(m.history, vec![(70, 70)]);
 }

@@ -548,7 +548,7 @@ mod restart_tests {
         assert!(t.requested && t.eligible && t.applied);
         assert_eq!(
             r.base.motors.outputs,
-            (-70 * (sign as i16), 70 * (sign as i16))
+            (70 * (sign as i16), 70 * (sign as i16))
         );
     }
     #[test]
@@ -561,7 +561,7 @@ mod restart_tests {
         let t = r.step(3.0, 0.0, None);
         assert!(!t.applied);
         assert_eq!(t.suppressed, Some(Reason::Disabled));
-        assert_eq!(r.base.motors.outputs, (-31, 31));
+        assert_eq!(r.base.motors.outputs, (31, 31));
         let mut r = AssistReplay::new(enabled());
         let t = r.step(3.0, 0.0, None);
         assert!(!t.applied);
@@ -599,7 +599,7 @@ mod restart_tests {
         assert!(!t.applied);
         assert_eq!(t.last_pulse_us, 90_000);
         assert!(t.last_pulse_us <= 150_000);
-        assert_eq!(r.base.motors.outputs, (-31, 31));
+        assert_eq!(r.base.motors.outputs, (31, 31));
         assert_eq!(t.cooldown_remaining_us, 1_000_000);
     }
     #[test]
@@ -629,7 +629,7 @@ mod restart_tests {
         }
         let t = r.step(-3.0, 0.0, None);
         assert_eq!(r.now - zero_time, 100_000);
-        assert_eq!(r.base.motors.outputs, (31, -31));
+        assert_eq!(r.base.motors.outputs, (-31, -31));
         assert!(!t.applied);
         assert_eq!(t.suppressed, Some(Reason::Cooldown));
     }
@@ -951,7 +951,7 @@ mod arbiter_tests {
             self.hold(2, 3.0 * sign);
             assert_eq!(self.m.motor.outputs, (0, 0));
             self.step(3.0 * sign);
-            assert_eq!(self.m.motor.outputs, (-70 * sign as i16, 70 * sign as i16));
+            assert_eq!(self.m.motor.outputs, (70 * sign as i16, 70 * sign as i16));
             assert_eq!(self.g.trace(self.t).unwrap().pulses_remaining, 1);
         }
     }
@@ -995,7 +995,7 @@ mod arbiter_tests {
         assert_eq!(t.commanded_pwm, 0.0);
         s.step(-3.0);
         assert_eq!(s.t - zero, 100_000);
-        assert_eq!(s.m.motor.outputs, (70, -70));
+        assert_eq!(s.m.motor.outputs, (-70, -70));
         assert_eq!(s.g.trace(s.t).unwrap().pulses_remaining, 0);
         let before =
             s.m.writes
@@ -1085,10 +1085,10 @@ mod arbiter_tests {
     fn legacy_default_keeps_original_one_kick_behavior() {
         let mut s = Trial::new(false);
         s.step(3.0);
-        assert_eq!(s.m.motor.outputs, (-70, 70));
+        assert_eq!(s.m.motor.outputs, (70, 70));
         s.hold(110, 0.0);
         s.step(3.0);
-        assert_eq!(s.m.motor.outputs, (-31, 31));
+        assert_eq!(s.m.motor.outputs, (31, 31));
         assert!(s.g.trace(s.t).is_none());
     }
     #[test]
@@ -1168,7 +1168,7 @@ mod arbiter_tests {
         }
         assert_eq!(s.t - start, 100_000);
         s.step_at(start + 101_200, -3.0, 0.0);
-        assert_eq!(s.m.motor.outputs, (70, -70));
+        assert_eq!(s.m.motor.outputs, (-70, -70));
         assert_eq!(s.g.trace(s.t).unwrap().pulses_remaining, 0);
     }
     #[test]

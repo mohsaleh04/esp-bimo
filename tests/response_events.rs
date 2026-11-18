@@ -238,7 +238,7 @@ fn ground_guard_veto_and_one_second_timeout_reach_physical_disarm_gate() {
         let o = r.sample(4.0, 0.0, true, 0.02, 540_000).unwrap();
         assert_eq!(guard.check(o.limited_pd, o.preview, 2.0), None);
         policy::drive(&mut m, &mut r, Some(o), 70, 540_000).unwrap();
-        assert_eq!(m.outputs, (-70, 70));
+        assert_eq!(m.outputs, (70, 70));
         if veto {
             assert!(guard.check(-4, preview(false, 0.0), 2.0).is_some());
             r.fail(balance::Fault::Motor);
@@ -325,7 +325,7 @@ fn active_ground(sign: i16) -> (policy::Response, Fake, ground::GroundGuard, pol
         .sample(f32::from(sign) * 4.0, 0.0, true, 0.01, 530_000)
         .unwrap();
     ground::drive(&mut m, &mut r, &mut g, Some(o), 70, 2.0, 530_000).unwrap();
-    assert_eq!(m.outputs, (-70 * sign, 70 * sign));
+    assert_eq!(m.outputs, (70 * sign, 70 * sign));
     (r, m, g, o)
 }
 fn assert_locked(
@@ -703,7 +703,7 @@ fn bidirectional_both_signs_zero_ack_deadtime_and_no_second_kick() {
         let (mut r, mut m, _, _) = active_ground(sign);
         let mut g = bidirectional::Interlock::default();
         bidir_step(&mut g, &mut r, &mut m, sign, 540_000, true);
-        assert_eq!(m.outputs, (-70 * sign, 70 * sign));
+        assert_eq!(m.outputs, (70 * sign, 70 * sign));
         bidir_step(&mut g, &mut r, &mut m, -sign, 550_000, true);
         assert_eq!(m.outputs, (0, 0));
         assert_eq!(g.telemetry(550_000).pending_direction, -sign);
@@ -712,7 +712,7 @@ fn bidirectional_both_signs_zero_ack_deadtime_and_no_second_kick() {
             assert_eq!(m.outputs, (0, 0));
         }
         bidir_step(&mut g, &mut r, &mut m, -sign, 650_000, true);
-        assert_eq!(m.outputs, (33 * sign, -33 * sign));
+        assert_eq!(m.outputs, (-33 * sign, -33 * sign));
         assert_eq!(g.kicks, 1);
         assert!(!g.kicking);
     }
@@ -824,7 +824,7 @@ fn bidirectional_deadtime_begins_after_zero_io_not_before_it() {
     bidir_step(&mut g, &mut r, &mut m, -1, 651_199, false);
     assert_eq!(m.outputs, (0, 0));
     bidir_step(&mut g, &mut r, &mut m, -1, 651_200, false);
-    assert_eq!(m.outputs, (33, -33));
+    assert_eq!(m.outputs, (-33, -33));
 }
 #[test]
 fn bidirectional_dry_preview_cannot_access_the_driver() {
@@ -832,7 +832,7 @@ fn bidirectional_dry_preview_cannot_access_the_driver() {
     let mut g = bidirectional::Interlock::default();
     let o = r.sample(4.0, 0.0, true, 0.01, 0).unwrap();
     g.preview(o, 0);
-    assert_eq!(g.applied, (-70, 70));
+    assert_eq!(g.applied, (70, 70));
     g.reset();
     assert_eq!(g.applied, (0, 0));
     assert!(!g.kicking);
@@ -911,7 +911,7 @@ fn bidirectional_zero_or_absent_output_cancels_kick_at_driver_gate() {
         assert_eq!(m.outputs, (0, 0));
         assert!(!g.kicking);
         bidir_step(&mut g, &mut r, &mut m, 1, 560_000, true);
-        assert_eq!(m.outputs, (-33, 33));
+        assert_eq!(m.outputs, (33, 33));
         assert_eq!(g.kicks, 1);
     }
 }
@@ -925,7 +925,7 @@ fn bidirectional_neutral_acceptance_does_not_consume_first_post_arm_kick() {
     assert_eq!(m.outputs, (0, 0));
     assert_eq!(g.kicks, 0);
     bidir_step(&mut g, &mut r, &mut m, 1, 540_000, true);
-    assert_eq!(m.outputs, (-70, 70));
+    assert_eq!(m.outputs, (70, 70));
     assert_eq!(g.kicks, 1);
 }
 
@@ -974,7 +974,7 @@ fn threshold_initial_plus_and_minus_three_and_four_get_one_symmetric_kick() {
         let (mut r, mut m, mut g) = threshold_trial(true);
         let o = threshold_step(&mut r, &mut m, &mut g, pd, 530_000);
         assert!(o.preview.kick_active);
-        assert_eq!(m.outputs, (-70 * pd.signum(), 70 * pd.signum()));
+        assert_eq!(m.outputs, (70 * pd.signum(), 70 * pd.signum()));
         assert_eq!(g.kicks, 1);
         assert!(g.kicking);
     }
@@ -986,7 +986,7 @@ fn threshold_other_profiles_still_require_four() {
         let o = threshold_step(&mut r, &mut m, &mut g, pd, 530_000);
         let duty = if pd.abs() == 4 { 70 } else { 31 };
         assert_eq!(o.preview.kick_active, pd.abs() == 4);
-        assert_eq!(m.outputs, (-duty * pd.signum(), duty * pd.signum()));
+        assert_eq!(m.outputs, (duty * pd.signum(), duty * pd.signum()));
     }
 }
 #[test]
@@ -995,13 +995,13 @@ fn threshold_kick_expires_at_150ms_to_ordinary_pwm_without_retrigger_while_held(
         let (mut r, mut m, mut g) = threshold_trial(true);
         for t in (530_000..680_000).step_by(10_000) {
             threshold_step(&mut r, &mut m, &mut g, 3 * sign, t);
-            assert_eq!(m.outputs, (-70 * sign, 70 * sign));
+            assert_eq!(m.outputs, (70 * sign, 70 * sign));
         }
         for t in (680_000..900_000).step_by(10_000) {
             let o = threshold_step(&mut r, &mut m, &mut g, 3 * sign, t);
             assert!(!o.preview.kick_active);
             assert!((o.preview.mapped_pwm.abs() - 31.538462).abs() < 0.0001);
-            assert_eq!(m.outputs, (-31 * sign, 31 * sign));
+            assert_eq!(m.outputs, (31 * sign, 31 * sign));
             assert_eq!(g.kicks, 1);
         }
     }
@@ -1019,7 +1019,7 @@ fn threshold_deadband_cancels_and_mapper_rearm_cannot_grant_second_applied_kick(
         }
         let o = threshold_step(&mut r, &mut m, &mut g, 3 * sign, 860_000);
         assert!(o.preview.kick_active); // Real mapper rearmed, final gate still vetoes boost.
-        assert_eq!(m.outputs, (-31 * sign, 31 * sign));
+        assert_eq!(m.outputs, (31 * sign, 31 * sign));
         assert_eq!(g.kicks, 1);
         assert!(!g.kicking);
     }
@@ -1039,7 +1039,7 @@ fn threshold_reversal_keeps_zero_deadtime_and_cooldown_has_no_delayed_kick() {
             // Reversal occurs before the mapper's 300ms cooldown expires.
             // Keeping the request past cooldown must not cause a delayed Kick.
             assert!(!o.preview.kick_active);
-            assert_eq!(m.outputs, (31 * sign, -31 * sign));
+            assert_eq!(m.outputs, (-31 * sign, -31 * sign));
             assert_eq!(g.kicks, 1);
         }
     }
@@ -1073,7 +1073,7 @@ fn threshold_three_cannot_bypass_readiness_and_new_neutral_acceptance() {
     assert_eq!(m.outputs, (0, 0));
     assert_eq!(g.kicks, 0);
     threshold_step(&mut r, &mut m, &mut g, 3, 540_000);
-    assert_eq!(m.outputs, (-70, 70));
+    assert_eq!(m.outputs, (70, 70));
     assert_eq!(g.kicks, 1);
 }
 
@@ -1090,7 +1090,7 @@ fn threshold_reversal_after_mapper_cooldown_still_cannot_apply_another_kick() {
         }
         let o = threshold_step(&mut r, &mut m, &mut g, -3 * sign, 950_000);
         assert!(o.preview.kick_active); // Mapper requests a new pulse after cooldown.
-        assert_eq!(m.outputs, (31 * sign, -31 * sign)); // Real final gate suppresses it.
+        assert_eq!(m.outputs, (-31 * sign, -31 * sign)); // Real final gate suppresses it.
         assert_eq!(g.kicks, 1);
         assert!(!g.kicking);
     }

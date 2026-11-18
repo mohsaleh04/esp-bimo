@@ -48,7 +48,7 @@ fn sequence_commands_both_motors_once_per_stage_with_neutral_between() {
         } else {
             -i16::from(duty)
         };
-        assert_eq!(m.outputs, (-u, u));
+        assert_eq!(m.outputs, (u, u));
         assert_eq!(m.commands, index + 1);
         sequence::shutdown(&mut m);
         assert_eq!(m.outputs, (0, 0));

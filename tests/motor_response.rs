@@ -101,7 +101,7 @@ fn arming_does_not_force_a_kick_requires_post_ready_neutral_then_request() {
     assert_eq!(wheel_commands(o.preview.final_pwm as i16), (70, 70));
 }
 #[test]
-fn zero_cancels_kick_and_reverse_preserves_electrical_signs() {
+fn zero_cancels_kick_and_reverse_commands_both_wheels_backwards() {
     let mut r = response(true);
     arm(&mut r);
     r.sample(0.0, 0.0, true, 0.02, 540_000);
@@ -117,7 +117,7 @@ fn zero_cancels_kick_and_reverse_preserves_electrical_signs() {
     let reverse = r.sample(-5.0, 0.0, true, 0.02, 700_000).unwrap();
     assert!(reverse.preview.final_pwm < 0.0);
     let (a, b) = wheel_commands(reverse.preview.final_pwm as i16);
-    assert!(a > 0 && b < 0);
+    assert!(a < 0 && b < 0);
 }
 #[test]
 fn tilt_invalid_timing_and_stale_latch_finish_and_prevent_reactivation() {
@@ -226,7 +226,7 @@ fn physical_output_gate_disarms_on_fault_timeout_and_dry_even_with_old_kick() {
         let mut m = FakeMotor::default();
         m.arm();
         policy::drive(&mut m, &mut r, Some(o), 70, 560_000).unwrap();
-        assert_eq!(m.output, (-70, 70));
+        assert_eq!(m.output, (70, 70));
         r.fail(fault);
         policy::drive(&mut m, &mut r, Some(o), 70, 560_000).unwrap(); // Stale kick cannot leak through.
         assert!(!m.armed);
@@ -273,7 +273,7 @@ fn normal_empty_polls_preserve_live_output_and_readiness_until_exact_freshness_l
         assert!(!r.finished);
         assert_eq!(r.state(), ResponseState::Active);
         assert!(r.control.sample_fresh(now));
-        assert_eq!(m.output, (-70, 70));
+        assert_eq!(m.output, (70, 70));
     }
     policy::drive(&mut m, &mut r, Some(o), 70, 600_001).unwrap(); // Gate itself checks time.
     assert!(r.finished);
@@ -634,7 +634,7 @@ fn five_second_response_survives_shared_two_second_cap_then_disarms_permanently(
         assert_eq!(r.state(), ResponseState::Active);
         if now > 2_520_000 {
             assert!(m.armed);
-            assert!(m.output.0 < 0 && m.output.1 > 0);
+            assert!(m.output.0 > 0 && m.output.1 > 0);
         }
     }
     r.tick(5_519_999);
