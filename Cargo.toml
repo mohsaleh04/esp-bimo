@@ -29,6 +29,7 @@ motor-kick-diagnostic = []
 motor-kick-live = ["motor-kick-diagnostic"]
 orientation-diagnostic = []
 balance-test = []
+balance-v2-test = []
 balance-live = ["balance-test"]
 balance-motor-response-test = ["balance-test"]
 balance-motor-response-live = ["balance-motor-response-test"]
@@ -44,6 +45,12 @@ balance-control-restart-assist = ["balance-control-test"]
 balance-control-rolling-assist = ["balance-control-test"]
 balance-control-recovery-assist = ["balance-control-rolling-assist"]
 balance-control-short-recovery-zero = ["balance-control-recovery-assist"]
+
+[[bin]]
+name = "balance-v2-test"
+path = "src/bin/balance_v2_test.rs"
+required-features = ["balance-v2-test"]
+
 
 [[bin]]
 name = "balance-control-test"
@@ -165,3 +172,4 @@ required-features = ["tb6612-diagnostic"]
 [[bin]]
 name = "hc-sr04-diagnostic"
 path = "src/bin/hc_sr04_diagnostic.rs"
+

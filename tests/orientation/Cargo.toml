@@ -55,3 +55,7 @@ path = "../hc_sr04.rs"
 [[test]]
 name = "tb6612-transitions"
 path = "../tb6612_transitions.rs"
+
+[[test]]
+name = "balance-v2"
+path = "../balance_v2.rs"
