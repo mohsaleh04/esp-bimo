@@ -6,7 +6,7 @@ use embassy_time::Timer;
 use esp_backtrace as _;
 use esp_bimo::{
     board::Board,
-    motors::{DualMotor, DutyLimit, l298n::L298n},
+    motors::{DualMotor, DutyLimit, tb6612::Tb6612},
 };
 use esp_hal::{
     clock::CpuClock,
@@ -26,12 +26,12 @@ async fn main(_spawner: Spawner) -> ! {
     let effective = limit.map(100);
     assert_eq!(effective.duty_percent, 100, "100% must not be clamped");
     assert_eq!(effective.direction.inputs(), (true, false)); // Logical positive before channel wiring polarity.
-    let mut motors = L298n::new(board.motor_pwm, board.motor_outputs, limit);
+    let mut motors = Tb6612::new(board.motor_pwm, board.motor_outputs, limit);
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
     let timg0 = TimerGroup::new(board.timer_group);
     esp_rtos::start(timg0.timer0, board.rtos_interrupt);
 
-    if !esp_bimo::motor_gpio::LEGACY_MOTOR_PROBES_LIVE {
+    if !esp_bimo::motor_gpio::TB6612_LEGACY_PROBES_LIVE {
         log::warn!("DRY: legacy motor probe locked out during TB6612 wiring verification");
         loop {
             Timer::after_secs(1).await;
@@ -43,7 +43,7 @@ async fn main(_spawner: Spawner) -> ! {
     // esp-hal 1.2.2 UP_ACTIVE_HIGH sets HIGH at zero and LOW at compare.
     // Period=999 counts 0..=999; set_timestamp(1000) is written without
     // clamping, so the LOW compare event never occurs: constant HIGH after TEZ.
-    // command() logs actual period/compare readback BEFORE enabling ENA.
+    // command() logs actual period/compare readback BEFORE enabling PWMA.
     info!(
         "PWM DIAGNOSTIC: A=LEFT reverse, B=RIGHT forward, requested=100%, effective={}% per channel.",
         effective.duty_percent,

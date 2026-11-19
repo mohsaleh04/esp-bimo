@@ -51,3 +51,7 @@ balance-control-short-recovery-zero = ["balance-control-recovery-assist"]
 [[test]]
 name = "hc-sr04"
 path = "../hc_sr04.rs"
+
+[[test]]
+name = "tb6612-transitions"
+path = "../tb6612_transitions.rs"

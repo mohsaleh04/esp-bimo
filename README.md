@@ -2,7 +2,13 @@
 
 Phase 2 sensor-only work: [orientation and axis-identification diagnostic](docs/orientation.md).
 
-The normal firmware now owns a disarmed L298N dual-motor driver; it never
+Shared balance runtime profiles require a common TB6612 LIVE authorization
+in addition to their profile-specific prerequisites. The shared gate defaults
+to closed. With a profile LIVE feature selected, firmware logs rejection and
+idles with the bridge disarmed. Use the profile's non-LIVE feature for DRY.
+Historical LIVE procedures below describe earlier firmware behavior.
+
+The normal firmware now owns a disarmed TB6612 dual-motor driver; it never
 commands movement. See [motor API, safety checks and opt-in test procedure](docs/motors.md).
 The separate `motor-test` feature/binary automatically pulses channel A once
 after a 3-second boot wait. No board was flashed or motor test run by the agent.
@@ -26,8 +32,9 @@ activation, servo PWM, or other sensor sampling is implemented.
 | Tilt | 2 | Untouched |
 | Vibration | 4 | Untouched |
 | IR analog / digital | 1 / 39 | Untouched |
-| L298N IN1 / IN2 / IN3 / IN4 | 5 / 6 / 7 / 15 | Output LOW |
-| L298N ENA / ENB | 16 / 17 | Output LOW, initialized first |
+| TB6612 AIN1 / AIN2 / BIN1 / BIN2 | 15 / 16 / 7 / 6 | Output LOW |
+| TB6612 PWMA / PWMB | 17 / 5 | Output LOW |
+| TB6612 STBY | 40 | Output LOW, initialized first |
 | Passive buzzer | 21 | Repeating 12-bar A minor melody |
 | Servo | 18 | Reserved, untouched |
 
@@ -36,12 +43,11 @@ pull-ups to 3.3 V and a common ground; do not pull ESP32 GPIOs up to 5 V.
 
 ## Motor safety
 
-Keep motor power disconnected for this milestone's first tests. Remove any
-L298N ENA/ENB jumpers that tie the enables high before connecting ESP32 GPIOs.
+Keep STBY pulled LOW externally during reset and boot.
 Use external pull-downs on both enable inputs, and hardware gating of motor
 power/enables if reset safety is required. Verify your actual module wiring.
 
-After HAL initialization, firmware sets ENA/ENB low, then all four direction
+After HAL initialization, firmware sets STBY and PWMA/PWMB low, then all four direction
 pins low, before initializing I²C, the heap, or the RTOS. It retains the GPIO
 drivers throughout normal operation and sensor failure/retry paths. There is
 no API here that drives a motor pin high. **Software does not guarantee GPIO
@@ -211,10 +217,9 @@ Output is truncated toward zero to the existing driver's 1% resolution.
 There is **no minimum-duty jump, full-duty startup kick, automatic compensation,
 self-righting or gain adaptation**. If low duty only buzzes or cannot overcome
 friction, stop and diagnose; the controller will not increase its limit itself.
-The existing L298N driver also inserts approximately 1.2 ms of disabled time on
-every command, including same-direction updates. This reduces effective drive;
-no compensation is applied. A future driver can retain the physical command
-mapping while implementing the `DualMotor` interface differently.
+The TB6612 driver keeps PWM routed for same-direction duty updates when the
+active channels stay the same. Starts and reconfiguration use at least 1.2 ms
+of disabled time. No duty compensation is applied.
 
 States and console commands:
 
@@ -243,7 +248,7 @@ There are no live-tuning console commands.
 ### Exact test procedure
 
 1. Keep motor power disconnected. Retain an accessible independent power cutoff.
-   Check common ground, valid L298N logic power and enable pull-downs using
+   Check common ground, valid TB6612 logic power and enable pull-downs using
    accessible points as described in `docs/motors.md`. No chassis dismantling
    or wiring modification is performed by this firmware.
 2. Build the observation/dry-run version (build commands do not flash):
@@ -319,11 +324,11 @@ shutdown guarantee from the configured timeout.
 The software 40 ms deadline is checked around operations; blocking I²C reads
 can delay when a fault is noticed. Existing I²C transactions have a 20 ms timeout
 and a BMI160 read can contain more than one transaction. The watchdog is the
-separate reset fallback; it cannot cure invalid L298N logic power or wiring.
+separate reset fallback; it cannot cure invalid TB6612 logic power or wiring.
 
 **A 9 V adapter with 6 V-rated motors remains an electrical risk.** Low average
 PWM duty does not turn the supply into a guaranteed 6 V source, limit stall
-current, or guarantee safe heating. L298N voltage drop varies with load. Motor
+current, or guarantee safe heating. TB6612 voltage drop varies with load. Motor
 current, motor-terminal voltage, adapter behavior and thermal performance remain
 unverified. The duty ceiling is not electrical protection. Keep initial tests
 brief and suspended, and resolve supply/current safety before floor balancing.
@@ -349,13 +354,13 @@ Returning upright or sending DRY/ARM does not clear a live fault: send `STOP` or
 
 ### Separate PWM startup diagnostic
 
-`motor-pwm-diagnostic` is an output-only, one-shot test using the existing L298N
+`motor-pwm-diagnostic` is an output-only, one-shot test using the existing TB6612
 MCPWM driver and wiring. It does not measure a startup threshold automatically:
 without encoders, the operator must record whether each wheel starts turning.
 A negative result means only that the tested pulse/duty did not start it.
 
 Before manually running, suspend and secure both wheels, keep a motor-power
-cutoff within reach, and verify common ground and valid L298N logic supply.
+cutoff within reach, and verify common ground and valid TB6612 logic supply.
 The current 9 V supply exceeds the motors' 6 V rating; a PWM ceiling does not
 limit instantaneous voltage or guarantee safe current/temperature. Avoid stalls.
 Software cannot guarantee reset-time GPIO levels or stop a pulse during a CPU
@@ -369,9 +374,8 @@ Do not raise the ceiling on the current supply without verifying motor safety.
 
 For A/right first, the running test holds its configured starting duty for one
 second, then reduces it by 5 percentage points every second down to 5%.
-It does not deliberately stop between running steps, though the reused driver
-briefly detaches enables during command updates (about 1.2 ms). Logging and
-scheduling add small timing overhead. Observe when the wheel stops; if it never
+The driver retains PWM routing during these same-direction running steps.
+Logging and scheduling add timing overhead. Observe when the wheel stops; if it never
 started, this is not a valid running-threshold measurement.
 
 Both motors are then disarmed for a 2-second coast pause. Starting attempts run
@@ -440,7 +444,7 @@ above the deadband; review that discontinuity before any future live test.
 There is no motion detection, start/run hysteresis, 100% kick, or high-duty pulse.
 
 At about 10 Hz, logs show pitch, pitch rate, raw PD, limited PD, mapped signed
-output, and electrical A/B commands `(-u,+u)`. Floating mapping state is retained
+output, and logical A/B commands `(u,u)`. Floating mapping state is retained
 for slew precision; final commands truncate toward zero to the driver's 1% units.
 Invalid/stale data clears the mapping state and logs `dry_u=None`.
 
@@ -533,7 +537,7 @@ These are candidates, not verified safe/working values. `TEST.ceiling` defaults
 to **30%**, so the 50% candidate kick is **blocked**, with an explanatory log.
 The program rejects invalid settings rather than silently clamping or bypassing
 its ceiling. Edit the constants in `src/bin/motor_kick_diagnostic.rs` only after
-verifying the motor supply, valid L298N logic supply/common ground, and a safe
+verifying the motor supply, valid TB6612 logic supply/common ground, and a safe
 suspended-wheel setup. Either lower candidate duties or explicitly configure a
 verified ceiling. Both kick and holding duty must fit it; 100% is rejected.
 
@@ -570,8 +574,8 @@ of about 9.72 V does not establish that any proposed PWM setting is safe. Keep a
 physical motor-power cutoff accessible. No wheel movement is automatically
 measured. Deadlines are nonblocking Embassy timers, not hardware pulse cutoffs:
 blocking logs, driver updates, executor stalls or CPU hangs can delay shutdown.
-The reused L298N driver briefly detaches enables during kick-to-hold updates;
-there is no intentional stop/pause between those phases. Software cannot
+The TB6612 driver can keep PWM routed during same-direction kick-to-hold
+updates on the same channels. Software cannot
 establish reset-time GPIO safety; external enable gating/pull-downs are needed
 for that guarantee. A panic may bypass normal cleanup.
 
@@ -589,11 +593,11 @@ Motor permission feature: **`balance-motor-response-live`**, independent of
 `balance-live`. The test feature reuses `balance-test` board-resource selection,
 but does not change or run that DRY binary. Calibration helper code is included
 by path; estimator, PD, proportional mapper, kick state machine, readiness
-policy, motor polarity function and L298N driver are reused without changes.
+policy, motor polarity function and TB6612 driver are reused without changes.
 
 Current physical labels for this diagnostic: **A = LEFT, B = RIGHT**. Historical
 labels elsewhere predate this correction. Forward electrical commands remain
-`(-u,+u)` and must be observed again with wheels suspended.
+`(u,u)` and must be observed again with wheels suspended.
 
 Constants at the top of `src/bin/balance_motor_response_test.rs`:
 
@@ -620,7 +624,7 @@ than silently bypassing or hiding a clamp. The 70% ceiling is a candidate,
 then 30%/1 s) was with suspended wheels only. It does not validate loaded use,
 50% sustained commands, motor terminal voltage, stall current, or temperature.
 Motors are rated 6 V; PWM percent is not a voltage/current guarantee. Verify the
-actual supply, common ground and L298N logic supply before any live build.
+actual supply, common ground and TB6612 logic supply before any live build.
 
 Exact activation sequence:
 
@@ -684,9 +688,10 @@ commands, not measured motor movement. Watch the wheels directly during the run.
 
 The loop polls with a 1 ms asynchronous yield and uses measured sensor dt; it
 introduces no kick/reversal sleep. This is not a guaranteed 100 Hz real-time loop:
-existing I2C is blocking (20 ms transaction timeout), and the reused motor driver
-briefly detaches enables and blocks about 1.2 ms per nonzero command. The new
-30 ms deadline detects excessive delay when execution resumes; no logging occurs
+existing I2C is blocking (20 ms transaction timeout), and the motor driver
+uses a gated wait on start and reconfiguration. Same-direction compare updates
+use timer-zero synchronization. The 30 ms deadline detects excessive delay
+when execution resumes; no logging occurs
 while outputs are active. The watchdog resets after about 100 ms if progress
 stops, but reset is NOT a guaranteed hardware motor cutoff. Reset/preboot GPIO
 states, brownouts and panics still require external enable pull-downs/gating for

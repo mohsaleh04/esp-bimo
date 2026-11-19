@@ -1406,3 +1406,11 @@ fn phase2_legacy_timing_is_labelled_and_no_active_run_stays_empty() {
     assert_eq!(stats.kick_durations_us(), &[10_000]);
     assert_eq!(stats.kick_on_us, 10_000);
 }
+
+#[test]
+fn shared_tb6612_gate_preserves_dry_and_rejects_live_even_with_local_approval() {
+    for profile_verified in [false, true] {
+        assert_eq!(settings::authorize_live(false, profile_verified), Ok(false));
+        assert!(settings::authorize_live(true, profile_verified).is_err());
+    }
+}

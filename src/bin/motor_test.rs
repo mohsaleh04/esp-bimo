@@ -15,23 +15,23 @@ use log::info;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 struct TestOutputs {
-    ena: Output<'static>,
-    enb: Output<'static>,
-    in1: Output<'static>,
-    in2: Output<'static>,
-    in3: Output<'static>,
-    in4: Output<'static>,
+    pwma: Output<'static>,
+    pwmb: Output<'static>,
+    ain1: Output<'static>,
+    ain2: Output<'static>,
+    bin1: Output<'static>,
+    bin2: Output<'static>,
 }
 
 impl TestOutputs {
     fn stop(&mut self) {
         // Disable bridges before clearing direction inputs.
-        self.ena.set_low();
-        self.enb.set_low();
-        self.in1.set_low();
-        self.in2.set_low();
-        self.in3.set_low();
-        self.in4.set_low();
+        self.pwma.set_low();
+        self.pwmb.set_low();
+        self.ain1.set_low();
+        self.ain2.set_low();
+        self.bin1.set_low();
+        self.bin2.set_low();
     }
 }
 
@@ -46,48 +46,48 @@ async fn main(_spawner: Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     // Own each pin directly from initialization through permanent lockout.
-    // No Board/L298n/MCPWM initialization or pin handoff in this diagnostic.
+    // No Board/Tb6612/MCPWM initialization or pin handoff in this diagnostic.
     let mut motors = TestOutputs {
-        ena: Output::new(
+        pwma: Output::new(
             esp_bimo::motor_gpio!(p, pwma),
             Level::Low,
             OutputConfig::default(),
         ),
-        enb: Output::new(
+        pwmb: Output::new(
             esp_bimo::motor_gpio!(p, pwmb),
             Level::Low,
             OutputConfig::default(),
         ),
-        in1: Output::new(
+        ain1: Output::new(
             esp_bimo::motor_gpio!(p, ain1),
             Level::Low,
             OutputConfig::default(),
         ),
-        in2: Output::new(
+        ain2: Output::new(
             esp_bimo::motor_gpio!(p, ain2),
             Level::Low,
             OutputConfig::default(),
         ),
-        in3: Output::new(
+        bin1: Output::new(
             esp_bimo::motor_gpio!(p, bin1),
             Level::Low,
             OutputConfig::default(),
         ),
-        in4: Output::new(
+        bin2: Output::new(
             esp_bimo::motor_gpio!(p, bin2),
             Level::Low,
             OutputConfig::default(),
         ),
     };
-    motors.ena.disconnect_from_peripheral_output();
-    motors.enb.disconnect_from_peripheral_output();
+    motors.pwma.disconnect_from_peripheral_output();
+    motors.pwmb.disconnect_from_peripheral_output();
     // Preserve the active-low buzzer's inactive level.
     let _buzzer = Output::new(p.GPIO21, Level::High, OutputConfig::default());
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
     let timg0 = TimerGroup::new(p.TIMG0);
     esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
 
-    if !esp_bimo::motor_gpio::LEGACY_MOTOR_PROBES_LIVE {
+    if !esp_bimo::motor_gpio::TB6612_LEGACY_PROBES_LIVE {
         log::warn!("DRY: legacy motor probe locked out during TB6612 wiring verification");
         loop {
             Timer::after_secs(1).await;
@@ -97,16 +97,16 @@ async fn main(_spawner: Spawner) -> ! {
     info!("STATIC MOTOR TEST: waiting 3 seconds; all six outputs LOW.");
     Timer::after_secs(3).await;
     info!(
-        "STATIC MOTOR TEST: starting B (RIGHT wheel), ENB/IN3 HIGH, IN4 LOW; A disabled; 250 ms target."
+        "STATIC MOTOR TEST: starting B (RIGHT wheel), PWMB/BIN1 HIGH, BIN2 LOW; A disabled; 250 ms target."
     );
     let (first, second) = esp_bimo::motors::control::Channel::B
         .direction_inputs(esp_bimo::motors::control::Direction::Positive);
-    motors.in3.set_level(first.into());
-    motors.in4.set_level(second.into());
+    motors.bin1.set_level(first.into());
+    motors.bin2.set_level(second.into());
     // Software timing, not a hardware cutoff against CPU failure or
     // excessive interrupt latency. Set direction before enabling the bridge.
     let deadline = Instant::now() + Duration::from_millis(1000);
-    motors.enb.set_high();
+    motors.pwmb.set_high();
     while Instant::now() < deadline {
         core::hint::spin_loop();
     }

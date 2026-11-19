@@ -15,8 +15,8 @@ const SENSOR_FAULT_REVIEWED: bool = true;
 const WINDOW_US: u64 = 1_000_000;
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) -> ! {
-    let live = runtime::ground::live_allowed(
-        cfg!(feature = "balance-bidirectional-ground-live"),
+    let source_verified = runtime::ground::live_allowed(
+        true,
         PHYSICAL_RESTRAINT_VERIFIED,
         INDEPENDENT_POWER_CUTOFF_VERIFIED,
         SUPPLY_LIMITS_VERIFIED,
@@ -24,7 +24,8 @@ async fn main(_spawner: Spawner) -> ! {
     );
     runtime::run_bidirectional(runtime::RunConfig {
         label: "BIDIRECTIONAL TETHERED GROUND CONTACT ONLY; BODY PHYSICALLY SUPPORTED",
-        live,
+        live_requested: cfg!(feature = "balance-bidirectional-ground-live"),
+        live_prerequisites_met: source_verified,
         window_us: WINDOW_US,
         ground: true,
         preparation_secs: 30,

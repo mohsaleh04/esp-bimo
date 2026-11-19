@@ -23,8 +23,8 @@ async fn main(_spawner: Spawner) -> ! {
         cfg!(feature = "balance-control-rolling-assist"),
         ROLLING_ASSIST_REVIEWED,
     );
-    let live = runtime::ground::live_allowed(
-        cfg!(feature = "balance-control-live"),
+    let source_verified = runtime::ground::live_allowed(
+        true,
         PHYSICAL_RESTRAINT_VERIFIED,
         INDEPENDENT_POWER_CUTOFF_VERIFIED,
         SUPPLY_LIMITS_VERIFIED,
@@ -37,7 +37,8 @@ async fn main(_spawner: Spawner) -> ! {
             } else {
                 "POLICY SELECTION BLOCKED/UNREVIEWED; DRY ONLY"
             },
-            live: live && selection.is_some(),
+            live_requested: cfg!(feature = "balance-control-live"),
+            live_prerequisites_met: source_verified && selection.is_some(),
             window_us: WINDOW_US,
             ground: true,
             preparation_secs: 30,

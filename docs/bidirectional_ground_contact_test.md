@@ -38,7 +38,7 @@ cargo build --release --locked --features balance-bidirectional-ground-live --bi
 - Initial Kick candidate 70%, at most 150ms; zero PD/deadband can cancel sooner.
   This is NOT a forced pulse on arming. It requires a meaningful post-arm request.
 - Duty ceiling 70% applies to both ordinary and Kick requests; no bypass.
-- Forward=(-u,+u), A=LEFT, B=RIGHT. Direction names refer to requested motion.
+- Logical forward=(u,u), A=LEFT, B=RIGHT. Direction names refer to requested motion.
 - Preparation **30s**, disarmed. Calibration/stabilization durations unchanged.
 - Fresh upright pose ±5° and ±5°/s for 500ms, then a NEW neutral sample (PD≤2).
   Motors remain disarmed in both waits. Combined arming timeout 10s.
@@ -105,7 +105,7 @@ capture and no wheel-speed feedback.
    clear wheel path, cable slack, and access to a separate motor-power switch.
    Keep a second person ready to cut power if possible. Do not rely on USB reset.
 2. Verify actual supply/current limits under load, motor terminal voltage/current,
-   L298N logic supply/common ground and thermal behavior. A PWM percentage does
+   TB6612 logic supply/common ground and thermal behavior. A PWM percentage does
    not establish safe voltage/current for the 6V motors. Check inrush/stall and
    adapter sag/current limiting; the earlier suspended test is insufficient.
 3. Run DRY first; complete both poses and use the 30s preparation interval to

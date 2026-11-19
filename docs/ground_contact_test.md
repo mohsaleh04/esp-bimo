@@ -238,7 +238,7 @@ sensor-fault category, malformed estimates/dt, both tilt signs, exact correction
 freshness/deadline boundaries, clock rollback, arming/ACTIVE timeouts, raw driver
 errors, output bounds, reversal, second kick and default opt-ins. A synthetic
 30222us test validates attribution arithmetic; it is not a new hardware timing
-measurement. Inspection of `L298n::disarm` confirms it detaches PWM, zeros compare
+measurement. Inspection of `Tb6612::disarm` confirms it detaches PWM, zeros compare
 values and drives all six GPIOs LOW. Host tests do not measure actual GPIO
 voltages, physical wheel stopping distance or power cutoff behavior.
 

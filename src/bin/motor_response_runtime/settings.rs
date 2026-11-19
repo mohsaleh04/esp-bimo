@@ -20,3 +20,19 @@ pub const KICK: KickConfig = KickConfig {
     rearm_delay_ms: 300,
     reversal_pause_ms: 100,
 };
+
+/// Shared hardware authorization, independent of profile and Cargo features.
+const TB6612_BALANCE_LIVE_VERIFIED: bool = false;
+
+pub fn authorize_live(requested: bool, profile_verified: bool) -> Result<bool, &'static str> {
+    if !requested {
+        return Ok(false);
+    }
+    if !TB6612_BALANCE_LIVE_VERIFIED {
+        return Err("shared TB6612 balance authorization is disabled");
+    }
+    if !profile_verified {
+        return Err("profile prerequisites or policy selection were not approved");
+    }
+    Ok(true)
+}

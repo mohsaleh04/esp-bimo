@@ -9,7 +9,7 @@ cutoff remain mandatory. No gains have been tuned by this software change.
 ## Architecture and states
 
 The profile reuses the existing shared runtime, two-pose calibration, learned
-pitch frame, complementary filter, PD function, PWM mapper, L298N driver,
+pitch frame, complementary filter, PD function, PWM mapper, TB6612 driver,
 acknowledged-zero interlock, watchdog and fixed-memory flight recorder.
 `control_profile.rs` adds only configuration selection, strict fault enforcement
 and behavior statistics. Shared PWM/settings constants now live in `settings.rs`
@@ -40,7 +40,7 @@ are printed AFTER motor shutdown, never as blocking logs in the powered loop.
 ## Unchanged control and safety
 
 - PD = 1.0 × pitch(deg) + 0.08 × rate(deg/s), Ki=0. Limited to ±15 and truncated
-  toward zero to integer PD units. Forward=(-u,+u), A LEFT, B RIGHT.
+  toward zero to integer PD units. Logical forward=(u,u), A LEFT, B RIGHT.
 - |limited PD|≤2 is zero. Ordinary PWM is proportional 30–50%; the first nonzero
   integer request, |PD|=3, maps to 31.54%, truncated to 31% at the driver.
 - Initial Kick eligibility |limited PD|≥3; 70%, at most 150ms, cancelled by zero
@@ -63,7 +63,7 @@ about 1ms intervals and updates the estimator/PD/mapping only for a fresh sample
 approximately 100Hz. Actual sample timestamp differences determine filter dt and
 Kick timing; elapsed wall time supervises deadlines and timeouts. Empty polls do
 not repeat motor commands or fabricate samples. There is no fixed-dt assumption.
-The existing L298N driver has short synchronous IO delays; no new blocking delay
+The existing TB6612 driver has short synchronous IO delays; no new blocking delay
 was added. The 100ms watchdog is backup only. Software cannot guarantee GPIO
 levels through reset/crash or all electrical faults; external cutoff remains
 necessary.
@@ -123,7 +123,7 @@ cargo run --release --locked --features balance-control-test --bin balance-contr
 
 Before any later LIVE session: inspect restraint in both directions, body support,
 wheel/cable clearance and an independent, reachable motor-power cutoff. Verify
-loaded motor terminal voltage/current, inrush, adapter limiting, L298N logic
+loaded motor terminal voltage/current, inrush, adapter limiting, TB6612 logic
 supply/grounds and heating for the 6V motors. Duty percentage is not a voltage or
 current guarantee. Complete DRY and inspect sign, sensor acceptance and deadlines.
 Use the preparation interval to secure the fixture. Hold upright/neutral; once

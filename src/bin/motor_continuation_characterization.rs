@@ -6,7 +6,7 @@ use esp_backtrace as _;
 use esp_bimo::{
     balance,
     board::Board,
-    motors::{Disarmed, DualMotor, DutyLimit, l298n::L298n},
+    motors::{Disarmed, DualMotor, DutyLimit, tb6612::Tb6612},
 };
 use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
 use log::{info, warn};
@@ -17,14 +17,14 @@ use sequence::{
 };
 esp_bootloader_esp_idf::esp_app_desc!();
 // Verify shared supply/current limits, physical restraint and independent power cutoff.
-const MOTOR_POWER_AND_RESTRAINT_VERIFIED: bool = true;
+const MOTOR_POWER_AND_RESTRAINT_VERIFIED: bool = false;
 const LIVE: bool = cfg!(feature = "motor-kick-live") && MOTOR_POWER_AND_RESTRAINT_VERIFIED;
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let board = Board::init(p);
-    let mut motors = L298n::new(
+    let mut motors = Tb6612::new(
         board.motor_pwm,
         board.motor_outputs,
         DutyLimit::new(CEILING),

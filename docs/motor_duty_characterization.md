@@ -1,8 +1,8 @@
 # Fixed-duty motor characterization (default DRY)
 
-This independent binary uses the existing L298N/MCPWM driver and Board pins. It
+This independent binary uses the existing TB6612/MCPWM driver and Board pins. It
 runs no estimator, PD, balance controller, Rolling Assist or startup Kick. Forward
-uses the confirmed robot-motion mapping (-u,+u): A/LEFT negative, B/RIGHT positive.
+uses the logical forward mapping (u,u): A/LEFT and B/RIGHT both positive.
 Both motors run together from the shared supply in each step. Backward uses
 (+u,-u). One paired driver command sets A/LEFT and B/RIGHT; this does not imply
 atomic hardware edges or equal physical wheel response.
@@ -44,6 +44,8 @@ Default DRY flash-and-monitor command, for the operator only:
 ```sh
 cargo run --release --bin motor-duty-characterization --features motor-duty-characterization
 ```
+
+`MOTOR_POWER_AND_RESTRAINT_VERIFIED` defaults to `false` in this binary.
 
 For a deliberately authorized LIVE test, change **only this diagnostic's**
 `MOTOR_POWER_AND_RESTRAINT_VERIFIED` to true after those checks, then use the existing

@@ -1,4 +1,4 @@
-# Historical MCPWM diagnostic with the previous L298N wiring
+# Historical MCPWM diagnostic before TB6612
 
 The GPIO and wheel observations below refer to the previous wiring. The current TB6612 map is in `motor_gpio.rs`.
 
@@ -83,6 +83,6 @@ the enables are disabled, before or after the energized interval. The log
 should show effective A=50%, B=0%, period=999, compare A=500, B=0.
 
 The timer deadline and Drop are not a hardware cutoff against CPU failure,
-interrupt stalls, reset, or invalid L298 logic supply. Existing logic-rail and
+interrupt stalls, reset, or an invalid logic supply. Existing logic-rail and
 boot/reset safety limitations in [motor safety notes](motors.md) still apply.
 No flashing or physical motor test was performed during this change.

@@ -1,8 +1,8 @@
 # Motor continuation characterization — default DRY
 
-Separate firmware, no PD/controller/estimator/Rolling Assist. Existing L298N,
+Separate firmware, no PD/controller/estimator/Rolling Assist. Existing TB6612,
 MCPWM settings and pin ownership are reused. A=LEFT, B=RIGHT; robot-forward
-uses (-u,+u), backward (+u,-u). Both motors are commanded together.
+uses (u,u), backward (-u,-u). Both motors are commanded together.
 
 | Stage | Direction | Startup (up to 100 ms) | Hold (up to 1 second) |
 |---|---|---:|---:|
@@ -47,6 +47,8 @@ Default DRY (operator command; flashes and runs):
 ```sh
 cargo run --release --bin motor-continuation-characterization --features motor-continuation-characterization
 ```
+
+`MOTOR_POWER_AND_RESTRAINT_VERIFIED` defaults to `false` in this binary.
 
 LIVE requires changing **this new binary's** `MOTOR_POWER_AND_RESTRAINT_VERIFIED`
 from false to true after the checks above, independently of the existing explicit

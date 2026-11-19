@@ -97,7 +97,7 @@ impl CommandGate {
     }
 }
 
-/// Common interface for L298N and future bridge implementations.
+/// Common interface for dual motor bridges.
 /// Positive/negative request logical forward/reverse. Drivers apply wiring polarity.
 pub trait DualMotor {
     fn arm(&mut self);

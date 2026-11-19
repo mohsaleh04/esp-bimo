@@ -2,7 +2,7 @@ use embassy_time::Timer;
 use esp_bimo::{
     balance,
     board::Board,
-    motors::{DualMotor, DutyLimit, l298n::L298n},
+    motors::{DualMotor, DutyLimit, tb6612::Tb6612},
     orientation::{AccelRejection, ComplementaryFilter},
     pwm_mapping,
 };
@@ -38,7 +38,8 @@ use settings::{
 
 pub struct RunConfig {
     pub label: &'static str,
-    pub live: bool,
+    pub live_requested: bool,
+    pub live_prerequisites_met: bool,
     pub window_us: u64,
     pub ground: bool,
     pub preparation_secs: u64,
@@ -178,13 +179,12 @@ async fn run_profile(
     policy: output::AssistPolicy,
 ) -> ! {
     let restart = policy != output::AssistPolicy::Legacy;
-    let live = config.live;
     let window_us = config.window_us;
     let preparation_secs = config.preparation_secs;
     esp_println::logger::init_logger_from_env();
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let board = Board::init(p);
-    let mut motors = L298n::new(
+    let mut motors = Tb6612::new(
         board.motor_pwm,
         board.motor_outputs,
         DutyLimit::new(MOTOR_DUTY_CEILING),
@@ -201,8 +201,21 @@ async fn run_profile(
     let mut watchdog = TimerGroup::new(board.balance_watchdog).wdt;
     watchdog.set_timeout(MwdtStage::Stage0, Duration::from_millis(100));
     watchdog.disable();
+    let live = match settings::authorize_live(config.live_requested, config.live_prerequisites_met)
+    {
+        Ok(live) => live,
+        Err(reason) => {
+            warn!(
+                "{}: LIVE request rejected: {reason}; motors disarmed until reset.",
+                config.label
+            );
+            loop {
+                Timer::after_secs(1).await;
+            }
+        }
+    };
     info!(
-        "{}: live={live}, ceiling={MOTOR_DUTY_CEILING}%, window={window_us}us. A=LEFT B=RIGHT; forward=(-u,+u). No serial input.",
+        "{}: live={live}, ceiling={MOTOR_DUTY_CEILING}%, window={window_us}us. A=LEFT B=RIGHT; logical forward=(u,u). No serial input.",
         config.label
     );
     if continuous {
@@ -217,7 +230,7 @@ async fn run_profile(
         );
     }
     if !live {
-        warn!("Movement disabled by diagnostic-specific feature/source gates; DRY only.");
+        warn!("DRY mode selected; motors remain disarmed.");
     }
     let valid_window = if continuous {
         window_us == control_profile::ACTIVE_US

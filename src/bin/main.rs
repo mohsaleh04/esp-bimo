@@ -34,7 +34,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let board = Board::init(peripherals);
     // No arm() or nonzero commands in normal firmware.
-    let _motors = esp_bimo::motors::l298n::L298n::new(
+    let _motors = esp_bimo::motors::tb6612::Tb6612::new(
         board.motor_pwm,
         board.motor_outputs,
         esp_bimo::motors::DutyLimit::new(30),

@@ -7,10 +7,11 @@ Do not use those paths for this procedure. No existing balancing code is changed
 
 ## Source inspection
 
-`src/board.rs` initializes GPIO17/5 and GPIO15/16/7/6 LOW, but does not
-own STBY. `src/motors/l298n.rs` uses MCPWM0 and is the existing normal motor
-abstraction. `src/balance.rs` labels A RIGHT / B LEFT. Neither is reused here.
-All motor GPIO claims use `src/motor_gpio.rs`. GPIO15/16 follow the reported wiring and need continuity checks. A=LEFT/B=RIGHT is the intended physical mapping. The historical balance polarity remains unchanged.
+The normal Board owns STBY and the six TB6612 PWM/direction GPIOs.
+`src/motors/tb6612.rs` routes PWM using MCPWM0. This standalone
+diagnostic owns the GPIOs independently. Both paths use `src/motor_gpio.rs`.
+The intended wheel mapping is A=LEFT and B=RIGHT. GPIO15/16 still need
+continuity checks and physical direction remains unverified.
 
 | Driver input | ESP32-S3 GPIO | Commanded state |
 | --- | --- | --- |
@@ -98,14 +99,14 @@ best effort, with the limitations described below.
 ### Pin ownership and PWM review
 
 The existing binary constructs GPIO40, 16, 17, 5, 6, 7 and 15 once and retains
-all seven in static storage. It never calls Board::init or the old L298n driver,
+all seven in static storage. It never calls Board::init or the shared Tb6612 driver,
 so their same-numbered pins are not claimed concurrently. Other diagnostics are
 separate binaries. No sensor, buzzer, servo, PWM or balancing task is started in
 the loaded build. No dependency, target, PID or wiring setting was changed.
 
 Loaded mode leaves GPIO17/5 LOW and configures neither LEDC nor MCPWM. The
 existing no-load implementation uses static HIGH as 100% PWM; it is excluded from
-loaded-only compilation. The older L298n driver configures MCPWM with a 40 MHz
+loaded-only compilation. The shared Tb6612 driver configures MCPWM with a 40 MHz
 clock, period 999 and requested 35 kHz while its comments/logs say 10 kHz. This
 existing mismatch was observed, not changed or reused as a basis for safe PWM.
 

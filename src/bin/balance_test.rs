@@ -7,7 +7,7 @@ use esp_backtrace as _;
 use esp_bimo::{
     balance::{Controller, Fault, Request, Settings, State, wheel_commands},
     board::Board,
-    motors::{DualMotor, DutyLimit, l298n::L298n},
+    motors::{DualMotor, DutyLimit, tb6612::Tb6612},
     orientation::ComplementaryFilter,
     pwm_mapping::{Config as PwmConfig, KickConfig, KickState},
 };
@@ -44,7 +44,7 @@ const DRY_KICK: KickConfig = KickConfig {
     reversal_pause_ms: 100,
 };
 
-fn disable(motors: &mut L298n, watchdog: &mut Wdt<TIMG1<'static>>, running: &mut bool) {
+fn disable(motors: &mut Tb6612, watchdog: &mut Wdt<TIMG1<'static>>, running: &mut bool) {
     // Disable outputs before watchdog changes or potentially blocking logging.
     motors.disarm();
     if *running {
@@ -65,7 +65,7 @@ async fn main(_spawner: Spawner) -> ! {
     assert!(DRY_KICK.valid(DRY_PWM));
     info!("DRY-only kick: {DRY_KICK:?}; no motor activation");
     info!("DRY-only PWM mapping: {DRY_PWM:?}; motors remain OFF");
-    let mut motors = L298n::new(
+    let mut motors = Tb6612::new(
         board.motor_pwm,
         board.motor_outputs,
         DutyLimit::new(settings.output_limit as u8),
@@ -237,7 +237,7 @@ async fn main(_spawner: Spawner) -> ! {
             disable(&mut motors, &mut watchdog, &mut watchdog_running);
             if control.state() != announced {
                 info!(
-                    "State {:?}; ENA/ENB LOW; deliberate request required to restart",
+                    "State {:?}; STBY and PWMA/PWMB LOW; deliberate request required to restart",
                     control.state()
                 );
                 announced = control.state();

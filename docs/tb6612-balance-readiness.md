@@ -4,12 +4,15 @@ Board creates STBY LOW before PWM/direction GPIO initialization. MotorOutputs
 owns GPIO40 and moves into the bridge driver. No second owner is created in
 the balance runtime. Other diagnostic binaries own their GPIO independently.
 
-The legacy L298n type now implements TB6612 standby gating. arm() stops first
-and grants command permission without raising STBY. A nonzero accepted command
-stops first, sets direction using the shared channel polarity, prepares compares,
-routes PWM and finally raises STBY. Rejected or zero commands, stop(), disarm()
-and ordinary Drop shut STBY down first, then detach PWM and clear directions.
-Fault shutdown depends on the controller calling stop/disarm, as before.
+`motors::tb6612::Tb6612` implements TB6612 standby gating. arm() stops first
+and grants command permission with STBY LOW. Repeating an effective command
+leaves the outputs alone. Same-direction duty changes with the same active
+channels use compare-only writes latched at timer zero. Starts, direction or
+active-channel changes, and duty changes involving 100% use the existing
+break-before-make path, with a timer-wrap check before routing and raising
+STBY. Rejected or zero commands, stop(), disarm() and ordinary Drop lower
+STBY first. A compare readback mismatch or reconfiguration latch timeout
+disarms. See [the motor driver notes](motors.md) for timing details.
 
 STBY LOW makes the TB6612 outputs high impedance (coast). This is not short
 braking. PWM LOW while STBY HIGH can brake the selected bridge. Requested
@@ -22,6 +25,13 @@ request opposite logical wheel directions. PD gains and pitch computation are
 unchanged. The sign relating positive pitch to physical forward lean still
 requires physical verification. The control-test restraint gate was reset to
 false because its previous confirmation predates this contract change.
+
+## Shared balance LIVE authorization
+
+All shared balance profiles check the source-level
+`TB6612_BALANCE_LIVE_VERIFIED` gate before calibration. The gate defaults to
+false. An explicit LIVE request fails closed and idles disarmed until reset.
+DRY runs use the existing profile features without their LIVE feature.
 
 ## Verification and remaining work
 

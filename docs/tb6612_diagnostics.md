@@ -1,6 +1,6 @@
 # TB6612 first motor test
 
-This is a separate binary, not a migration of L298N or the balance controller.
+This binary drives TB6612 independently of the shared balance runtime.
 Board::init creates I2C/buzzer/sensor resources and lacks STBY, so this binary
 owns its pins directly. Old wheel labels differ: this test strictly uses A=LEFT,
 B=RIGHT. The old PWM mapper, kick, recovery, PD and assists are not invoked.

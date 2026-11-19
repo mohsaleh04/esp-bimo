@@ -2,7 +2,7 @@
 
 This is a sensor-only diagnostic. **There is no PD/PID, balance control, arm
 call, motor driver or PWM initialization.** It retains the six inactive motor
-GPIO owners for the whole task; ENA/ENB and IN1–IN4 stay LOW. Disconnect motor
+GPIO owners for the whole task; STBY, PWMA/PWMB and the four direction pins stay LOW. Disconnect motor
 battery power during this test. The buzzer input stays HIGH/inactive so sound
 and vibration do not disturb calibration. Normal firmware, buzzer implementation,
 BMI160 driver, and both motor-test binaries are unchanged.
@@ -22,7 +22,7 @@ specified by the [Bosch BMI160 datasheet](https://www.bosch-sensortec.com/media/
 
 The repository does **not** establish the sensor's physical mounting axes.
 An old static gravity vector alone cannot identify robot-forward or the wheel
-axle. No X/Y/Z axis is hard-coded as pitch. Historical L298N A=RIGHT and B=LEFT wheel observations
+axle. No X/Y/Z axis is hard-coded as pitch. Historical A=RIGHT and B=LEFT wheel observations from the earlier bridge
 do not determine the IMU axes.
 
 ## Guided experiment: learn the physical pitch axis

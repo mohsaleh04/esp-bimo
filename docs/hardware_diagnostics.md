@@ -12,8 +12,8 @@ longer works. ROM boot messages can still appear on GPIO43 before firmware runs;
 verify the touch module tolerates that or disable ROM UART output separately.
 Do not connect an external UART adapter to touch pins.
 
-This standalone binary does not call Board::init: the existing board and motor
-code use L298N and have no TB6612 STBY ownership. GPIO40 is its first output,
+This standalone binary owns its TB6612 pins independently of Board::init.
+GPIO40 is its first output,
 held LOW; all six wheel control outputs also stay LOW. GPIO18 and GPIO48 are
 untouched. A physical STBY pull-down is required during reset/pre-boot.
 

@@ -26,15 +26,15 @@ pub struct Board {
     pub qmc5883l_drdy: Input<'static>,
 }
 
-/// Initial inactive state. Move this entire owner into L298n; never recreate pins.
+/// Initial inactive state. Move this entire owner into Tb6612; never recreate pins.
 pub struct MotorOutputs {
     pub(crate) stby: Output<'static>,
-    pub(crate) ena: Output<'static>,
-    pub(crate) enb: Output<'static>,
-    pub(crate) in1: Output<'static>,
-    pub(crate) in2: Output<'static>,
-    pub(crate) in3: Output<'static>,
-    pub(crate) in4: Output<'static>,
+    pub(crate) pwma: Output<'static>,
+    pub(crate) pwmb: Output<'static>,
+    pub(crate) ain1: Output<'static>,
+    pub(crate) ain2: Output<'static>,
+    pub(crate) bin1: Output<'static>,
+    pub(crate) bin2: Output<'static>,
 }
 
 impl Board {
@@ -48,32 +48,32 @@ impl Board {
                 Level::Low,
                 OutputConfig::default(),
             ),
-            ena: Output::new(
+            pwma: Output::new(
                 crate::motor_gpio!(p, pwma),
                 Level::Low,
                 OutputConfig::default(),
             ),
-            enb: Output::new(
+            pwmb: Output::new(
                 crate::motor_gpio!(p, pwmb),
                 Level::Low,
                 OutputConfig::default(),
             ),
-            in1: Output::new(
+            ain1: Output::new(
                 crate::motor_gpio!(p, ain1),
                 Level::Low,
                 OutputConfig::default(),
             ),
-            in2: Output::new(
+            ain2: Output::new(
                 crate::motor_gpio!(p, ain2),
                 Level::Low,
                 OutputConfig::default(),
             ),
-            in3: Output::new(
+            bin1: Output::new(
                 crate::motor_gpio!(p, bin1),
                 Level::Low,
                 OutputConfig::default(),
             ),
-            in4: Output::new(
+            bin2: Output::new(
                 crate::motor_gpio!(p, bin2),
                 Level::Low,
                 OutputConfig::default(),

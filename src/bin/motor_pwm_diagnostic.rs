@@ -6,7 +6,7 @@ use embassy_time::Timer;
 use esp_backtrace as _;
 use esp_bimo::{
     board::Board,
-    motors::{DualMotor, DutyLimit, l298n::L298n},
+    motors::{DualMotor, DutyLimit, tb6612::Tb6612},
 };
 use esp_hal::{
     clock::CpuClock,
@@ -31,13 +31,13 @@ const STOP_PAUSE_MS: u64 = 2_000;
 const BETWEEN_MOTORS_MS: u64 = 3_000;
 
 // The other channel is always commanded zero; confirmed forward polarities.
-fn command(motors: &mut L298n, right: bool, duty: u8) -> bool {
+fn command(motors: &mut Tb6612, right: bool, duty: u8) -> bool {
     let duty = i16::from(duty);
     let (a, b) = if right { (-duty, 0) } else { (0, duty) };
     motors.command(a, b).is_ok()
 }
 
-async fn test_motor(motors: &mut L298n, name: &str, right: bool, start: u8) -> bool {
+async fn test_motor(motors: &mut Tb6612, name: &str, right: bool, start: u8) -> bool {
     info!("{name}: RUNNING test; start={start}%; must already be verified to spin this wheel.");
     motors.arm();
     let mut duty = start;
@@ -94,7 +94,7 @@ async fn main(_spawner: Spawner) -> ! {
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     let board = Board::init(p); // Enables and direction outputs LOW first.
     let limit = DutyLimit::new(MAX_DUTY_PERCENT);
-    let mut motors = L298n::new(board.motor_pwm, board.motor_outputs, limit);
+    let mut motors = Tb6612::new(board.motor_pwm, board.motor_outputs, limit);
     motors.disarm();
     motors.set_command_logging(false); // Use explicit phase/duty logs below; no per-command driver telemetry.
     let _buzzer = board.buzzer; // Keep active-low buzzer inactive.
@@ -127,7 +127,7 @@ async fn main(_spawner: Spawner) -> ! {
     );
     Timer::after_secs(STARTUP_DELAY_SECS).await;
 
-    if !esp_bimo::motor_gpio::LEGACY_MOTOR_PROBES_LIVE {
+    if !esp_bimo::motor_gpio::TB6612_LEGACY_PROBES_LIVE {
         log::warn!("DRY: legacy motor probe locked out during TB6612 wiring verification");
         loop {
             Timer::after_secs(1).await;

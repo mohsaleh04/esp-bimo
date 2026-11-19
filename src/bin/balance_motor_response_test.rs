@@ -13,7 +13,8 @@ const WINDOW_US: u64 = 30_000_000;
 async fn main(_spawner: Spawner) -> ! {
     runtime::run(runtime::RunConfig {
         label: "SUSPENDED WHEELS ONLY",
-        live: cfg!(feature = "balance-motor-response-live") && SUPPLY_AND_CEILING_VERIFIED,
+        live_requested: cfg!(feature = "balance-motor-response-live"),
+        live_prerequisites_met: SUPPLY_AND_CEILING_VERIFIED,
         window_us: WINDOW_US,
         ground: false,
         preparation_secs: 15,
