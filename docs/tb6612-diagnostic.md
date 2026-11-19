@@ -1,8 +1,8 @@
 # Isolated TB6612 diagnostic: logic-only and explicitly gated NO-LOAD
 
 This document applies only to **`tb6612-diagnostic`** (hyphen, singular).
-The pre-existing `tb6612_diagnostics` binary and its `tb6612-live` /
-`tb6612-both` options are separate legacy paths with automatic motor pulses.
+The separate [`tb6612_diagnostics` direction tool](tb6612_diagnostics.md)
+requires a compile-time stage choice and fresh console authorization for a pulse.
 Do not use those paths for this procedure. No existing balancing code is changed.
 
 ## Source inspection

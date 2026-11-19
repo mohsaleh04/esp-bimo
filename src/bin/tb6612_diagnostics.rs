@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 use esp_backtrace as _;
-use esp_bimo::motors::control::{Channel, Direction};
+use esp_bimo::motors::control::{self, Channel, Direction};
 use esp_hal::{
     delay::Delay,
     gpio::{DriveMode, Level, Output, OutputConfig},
@@ -11,14 +11,25 @@ use esp_hal::{
         timer::{self, TimerIFace},
     },
     time::{Duration, Instant, Rate},
+    timer::timg::{MwdtStage, TimerGroup},
+    usb::usb_serial_jtag::{UsbSerialJtag, UsbSerialJtagRx},
 };
 use log::{info, warn};
+
+#[path = "tb6612_diagnostics/sequence.rs"]
+mod sequence;
+use sequence::{Confirmation, Stage, selected_stage};
+
 esp_bootloader_esp_idf::esp_app_desc!();
 // Raising this requires renewed physical-test authorization; no automatic ramp.
 const TEST_DUTY: u8 = 15;
 const AUTHORIZED_MAX_DUTY: u8 = 15;
-const RUN_MS: u64 = 250; // Margin below the 300ms software limit.
-const PAUSE_MS: u32 = 2000;
+const RUN_MS: u64 = 250;
+const WATCHDOG_MS: u64 = 300;
+const CONFIRMATION_SECS: u64 = 30;
+
+// Deliberately select one stage in source for each authorized build.
+const MANUALLY_AUTHORIZED_STAGE: Option<Stage> = None;
 struct Gates {
     stby: Output<'static>,
     a1: Output<'static>,
@@ -40,6 +51,56 @@ impl Drop for Gates {
         self.stop();
     }
 }
+fn log_stage(stage: Stage) -> [(bool, bool); 2] {
+    let [a, b] = stage.directions();
+    let ain = Channel::A.direction_inputs(a);
+    let bin = Channel::B.direction_inputs(b);
+    info!(
+        "{stage:?}: A/LEFT={a:?}/{}% B/RIGHT={b:?}/{}%; AIN={ain:?} BIN={bin:?}; target={RUN_MS}ms; STBY currently LOW",
+        if a == Direction::Stopped {
+            0
+        } else {
+            TEST_DUTY
+        },
+        if b == Direction::Stopped {
+            0
+        } else {
+            TEST_DUTY
+        },
+    );
+    [ain, bin]
+}
+
+fn confirm(serial: &mut UsbSerialJtagRx<'_, esp_hal::Blocking>, delay: &Delay) -> bool {
+    // Discard input already buffered before requesting fresh confirmation.
+    let mut discard = [0; 64];
+    if serial.drain_rx_fifo(&mut discard) == discard.len() {
+        return false;
+    }
+    warn!(
+        "ONE PULSE ONLY: after checking restraint and power cutoff, type RUN + Enter within {CONFIRMATION_SECS}s."
+    );
+    let start = Instant::now();
+    let mut confirmation = Confirmation::default();
+    while start.elapsed() < Duration::from_secs(CONFIRMATION_SECS) {
+        if let Ok(byte) = serial.read_byte() {
+            if let Some(accepted) = confirmation.push(byte) {
+                return accepted;
+            }
+        } else {
+            delay.delay_millis(1);
+        }
+    }
+    false
+}
+
+fn idle(delay: &Delay) -> ! {
+    info!("DONE: disarmed; STBY LOW PWM=0; idle until reset");
+    loop {
+        delay.delay_millis(1000);
+    }
+}
+
 #[esp_hal::main]
 fn main() -> ! {
     let p = esp_hal::init(esp_hal::Config::default());
@@ -65,15 +126,27 @@ fn main() -> ! {
     esp_println::logger::init_logger_from_env();
     let delay = Delay::new();
     assert!(TEST_DUTY > 0 && TEST_DUTY <= AUTHORIZED_MAX_DUTY && AUTHORIZED_MAX_DUTY <= 15);
-    assert!(RUN_MS > 0 && RUN_MS <= 300);
-    let live = cfg!(feature = "tb6612-live");
-    warn!(
-        "TB6612 mode={} A=LEFT B=RIGHT; STBY=LOW PWM=0; no motion feedback",
-        if live { "LIVE" } else { "DRY" }
+    assert!(RUN_MS > 0 && RUN_MS < WATCHDOG_MS);
+    let stage = selected_stage(
+        cfg!(feature = "tb6612-live"),
+        cfg!(feature = "tb6612-both"),
+        MANUALLY_AUTHORIZED_STAGE,
     );
+    let Some(stage) = stage else {
+        warn!(
+            "DRY: one-wheel LIVE requires tb6612-live, one source-selected stage and no tb6612-both; STBY LOW and PWM GPIOs LOW"
+        );
+        for stage in Stage::ALL {
+            log_stage(stage);
+        }
+        idle(&delay);
+    };
+
     warn!(
-        "Requires hardware STBY pull-down and external power cutoff; USB disconnect/CPU halt is NOT a stop mechanism"
+        "One-wheel direction test, A=LEFT B=RIGHT; no current or motion feedback; keep independent motor-power cutoff accessible."
     );
+    let [(a1, a2), (b1, b2)] = log_stage(stage);
+    let (mut serial, _tx) = UsbSerialJtag::new(p.USB_DEVICE).split();
     let mut ledc = Ledc::new(p.LEDC);
     ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
     let mut timer = ledc.timer::<LowSpeed>(timer::Number::Timer0);
@@ -94,77 +167,41 @@ fn main() -> ! {
         })
         .expect("zero-duty PWM");
     }
-    info!("Startup pause 5s, STBY LOW; support wheels and prepare motor power cutoff");
+    info!("Startup pause 5s; STBY LOW and both PWM duties zero");
     delay.delay_millis(5000);
-    let stages = [
-        ("LEFT +", true, false, true),
-        ("LEFT -", true, false, false),
-        ("RIGHT +", false, true, true),
-        ("RIGHT -", false, true, false),
-        ("BOTH +", true, true, true),
-        ("BOTH -", true, true, false),
-    ];
-    for (index, (label, use_a, use_b, forward)) in stages.into_iter().enumerate() {
-        if index >= 4 && !cfg!(feature = "tb6612-both") {
-            continue;
-        }
-        gates.stop();
-        a.set_duty(0).expect("stop A");
-        b.set_duty(0).expect("stop B");
-        let direction = if forward {
-            Direction::Positive
-        } else {
-            Direction::Negative
-        };
-        let a_inputs =
-            Channel::A.direction_inputs(if use_a { direction } else { Direction::Stopped });
-        let b_inputs =
-            Channel::B.direction_inputs(if use_b { direction } else { Direction::Stopped });
-        info!(
-            "Stage {} {label}: requested A={} B={}%, logical direction={:?}; AIN={a_inputs:?} BIN={b_inputs:?}, duration={RUN_MS}ms; STBY currently LOW, planned={}",
-            index + 1,
-            if use_a { TEST_DUTY } else { 0 },
-            if use_b { TEST_DUTY } else { 0 },
-            direction,
-            if live {
-                "HIGH during pulse"
-            } else {
-                "LOW throughout DRY"
-            }
-        );
-        if live {
-            gates.a1.set_level(a_inputs.0.into());
-            gates.a2.set_level(a_inputs.1.into());
-            gates.b1.set_level(b_inputs.0.into());
-            gates.b2.set_level(b_inputs.1.into());
-            a.set_duty(if use_a { TEST_DUTY } else { 0 })
-                .expect("A duty");
-            b.set_duty(if use_b { TEST_DUTY } else { 0 })
-                .expect("B duty");
-            delay.delay_micros(100); // PWM settled while STBY LOW.
-            let start = Instant::now();
-            gates.stby.set_high();
-            while start.elapsed() < Duration::from_millis(RUN_MS) {
-                core::hint::spin_loop();
-            }
-            gates.stop();
-            a.set_duty(0).expect("stop A");
-            b.set_duty(0).expect("stop B");
-            info!(
-                "Stage {} stopped: STBY LOW PWM=0 elapsed_us={} (software measurement, no wheel feedback)",
-                index + 1,
-                start.elapsed().as_micros()
-            );
-        } else {
-            info!("DRY: stage skipped; STBY LOW PWM=0");
-        }
-        delay.delay_millis(PAUSE_MS);
+    if !confirm(&mut serial, &delay) {
+        warn!("Confirmation missing or invalid; no pulse, reset required");
+        idle(&delay);
+    }
+
+    // Prepare only one channel while standby is still asserted.
+    gates.a1.set_level(a1.into());
+    gates.a2.set_level(a2.into());
+    gates.b1.set_level(b1.into());
+    gates.b2.set_level(b2.into());
+    if a1 || a2 {
+        a.set_duty(TEST_DUTY).expect("A duty");
+    } else {
+        b.set_duty(TEST_DUTY).expect("B duty");
+    }
+    delay.delay_micros(100);
+
+    let mut watchdog = TimerGroup::new(p.TIMG1).wdt;
+    watchdog.set_timeout(MwdtStage::Stage0, Duration::from_millis(WATCHDOG_MS));
+    watchdog.enable();
+    watchdog.feed();
+    let start = Instant::now();
+    gates.stby.set_high();
+    while start.elapsed() < Duration::from_millis(RUN_MS) {
+        core::hint::spin_loop();
     }
     gates.stop();
+    let elapsed = start.elapsed().as_micros();
     a.set_duty(0).expect("final A off");
     b.set_duty(0).expect("final B off");
-    info!("DONE: STBY LOW PWM=0; idle, no repeats until reset");
-    loop {
-        delay.delay_millis(1000);
-    }
+    watchdog.disable();
+    info!(
+        "{stage:?} stopped: STBY LOW PWM=0 elapsed_us={elapsed} (software timing, no wheel feedback)"
+    );
+    idle(&delay);
 }
