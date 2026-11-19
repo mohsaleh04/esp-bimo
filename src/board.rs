@@ -17,7 +17,7 @@ pub struct Board {
     pub motor_pwm: MCPWM0<'static>,
     #[cfg(feature = "balance-test")]
     pub balance_console: esp_hal::peripherals::USB_DEVICE<'static>,
-    #[cfg(feature = "balance-test")]
+    #[cfg(any(feature = "balance-test", feature = "balance-v2-live"))]
     pub balance_watchdog: esp_hal::peripherals::TIMG1<'static>,
     pub buzzer: Output<'static>,
     pub i2c: I2c<'static, Blocking>,
@@ -97,7 +97,7 @@ impl Board {
             motor_pwm: p.MCPWM0,
             #[cfg(feature = "balance-test")]
             balance_console: p.USB_DEVICE,
-            #[cfg(feature = "balance-test")]
+            #[cfg(any(feature = "balance-test", feature = "balance-v2-live"))]
             balance_watchdog: p.TIMG1,
             buzzer,
             i2c,

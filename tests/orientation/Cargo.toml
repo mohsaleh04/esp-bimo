@@ -59,3 +59,7 @@ path = "../tb6612_transitions.rs"
 [[test]]
 name = "balance-v2"
 path = "../balance_v2.rs"
+
+[[test]]
+name = "balance-v2-live"
+path = "../balance_v2_live.rs"
