@@ -12,6 +12,7 @@ path = "./src/bin/main.rs"
 [features]
 default = []
 tb6612-diagnostic = []
+tb6612-direction-dry = []
 # Fail-closed request: connected-motor activation needs current-limit review.
 tb6612-diagnostic-loaded = ["tb6612-diagnostic"]
 # Only with BOTH motors physically disconnected from all driver outputs.
@@ -178,3 +179,7 @@ required-features = ["tb6612-diagnostic"]
 name = "hc-sr04-diagnostic"
 path = "src/bin/hc_sr04_diagnostic.rs"
 
+[[bin]]
+name = "tb6612-direction-dry"
+path = "src/bin/tb6612_direction_dry.rs"
+required-features = ["tb6612-direction-dry"]
