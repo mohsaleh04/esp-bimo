@@ -221,7 +221,7 @@ fn physical_output_gate_disarms_on_fault_timeout_and_dry_even_with_old_kick() {
         arm(&mut r);
         r.sample(0.0, 0.0, true, 0.02, 540_000);
         let o = r.sample(4.5, 0.0, true, 0.02, 560_000).unwrap();
-        assert_eq!(o.limited_pd, 5);
+        assert_eq!(o.limited_pd, 4);
         assert!(o.preview.mapped_pwm >= 30.0);
         let mut m = FakeMotor::default();
         m.arm();

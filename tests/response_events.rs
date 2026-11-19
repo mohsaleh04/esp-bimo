@@ -784,19 +784,16 @@ fn bidirectional_timeout_during_wait_and_driver_error_disarm() {
     }
 }
 #[test]
-fn ground_preparation_is_scoped_and_all_new_gates_disabled() {
+fn ground_preparation_is_scoped_and_shared_live_authorization_is_closed() {
     let ground = include_str!("../src/bin/balance_ground_contact_test.rs");
     let bidir = include_str!("../src/bin/balance_bidirectional_ground_test.rs");
     for s in [ground, bidir] {
         assert!(s.contains("preparation_secs: 30"));
     }
-    for name in [
-        "PHYSICAL_RESTRAINT_VERIFIED",
-        "INDEPENDENT_POWER_CUTOFF_VERIFIED",
-        "SUPPLY_LIMITS_VERIFIED",
-        "SENSOR_FAULT_REVIEWED",
-    ] {
-        assert!(bidir.contains(&format!("const {name}: bool = false;")));
+    // Local operator flags may be true; shared authorization still denies LIVE.
+    for local_verified in [false, true] {
+        assert!(settings::authorize_live(true, local_verified).is_err());
+        assert_eq!(settings::authorize_live(false, local_verified), Ok(false));
     }
     assert!(
         include_str!("../src/bin/balance_motor_response_test.rs").contains("preparation_secs: 15")

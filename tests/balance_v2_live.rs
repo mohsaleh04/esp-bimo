@@ -115,8 +115,8 @@ fn arming_and_active_timeouts_latch_and_disarm() {
     let mut session = Session::new(&mut motor, 0);
     arm(&mut session);
     observe(&mut session, 530_000, 5.0, 0.0, true, [34, 34]).unwrap();
-    session.tick(2_519_999).unwrap();
-    assert_eq!(session.tick(2_520_000), Err(Stop::ActiveTimeout));
+    session.tick(180_519_999).unwrap();
+    assert_eq!(session.tick(180_520_000), Err(Stop::ActiveTimeout));
     assert_eq!(session.state(), State::Finished(Stop::ActiveTimeout));
     assert!(!motor.armed);
     assert_eq!(motor.command, (0, 0));
@@ -143,7 +143,7 @@ fn estimator_errors_and_invalid_commands_fail_closed() {
         assert!(!motor.armed);
         assert_eq!(motor.command, (0, 0));
     }
-    for wheels in [[36, 36], [34, -34]] {
+    for wheels in [[46, 46], [34, -34]] {
         let mut motor = Motor::default();
         let mut session = Session::new(&mut motor, 0);
         arm(&mut session);
@@ -185,7 +185,7 @@ fn production_pd_feeds_mock_motor_and_expired_sample_disarms_it() {
         observe(&mut trial, now, pitch, 0.0, true, preview.wheels).unwrap();
     }
     assert_eq!(trial.state(), State::Active);
-    assert_eq!(trial.last_command(), 18);
+    assert_eq!(trial.last_command(), 21);
     let stale = controller.check_freshness(580_001).unwrap_err();
     assert_eq!(stale, Fault::StaleSample);
     assert_eq!(trial.finish(Stop::Sensor(stale)), Stop::Sensor(stale));
@@ -199,9 +199,9 @@ fn session_needs_only_fresh_upright_neutral_samples_and_cannot_restart_after_com
     let mut session = Session::new(&mut motor, 0);
     arm(&mut session);
     assert_eq!(session.last_command(), 0);
-    assert_eq!(session.tick(2_520_000), Err(Stop::ActiveTimeout));
+    assert_eq!(session.tick(180_520_000), Err(Stop::ActiveTimeout));
     assert_eq!(
-        observe(&mut session, 2_530_000, 0.0, 0.0, true, [0, 0]),
+        observe(&mut session, 180_530_000, 0.0, 0.0, true, [0, 0]),
         Err(Stop::ActiveTimeout)
     );
     assert!(!motor.armed);

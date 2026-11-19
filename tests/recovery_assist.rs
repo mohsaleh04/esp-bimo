@@ -448,7 +448,7 @@ fn recovery_margin_and_evidence_boundaries_are_conservative() {
             }
         );
     }
-    for angle in [16.36, 18.0, 20.99] {
+    for angle in [20.36, 22.0, 24.99] {
         let mut r = Recovery::new();
         r.update(
             input(0, angle, 5.0),
@@ -492,7 +492,7 @@ fn recovery_margin_and_evidence_boundaries_are_conservative() {
 }
 
 #[test]
-fn control_21_degree_boundary_stops_actual_outputs_for_all_authorities() {
+fn control_25_degree_boundary_stops_actual_outputs_for_all_authorities() {
     for mode in [
         output::AssistPolicy::Legacy,
         output::AssistPolicy::Fixed,
@@ -502,9 +502,9 @@ fn control_21_degree_boundary_stops_actual_outputs_for_all_authorities() {
             let mut s = Integrated::new();
             s.g = output::MotorOutput::with_policy(mode);
             s.g.confirm_zero(&mut s.m, || s.now);
-            s.at(s.now + 10_000, sign * 20.999, 0.0, true);
+            s.at(s.now + 10_000, sign * 24.999, 0.0, true);
             assert!(!s.r.finished);
-            s.at(s.now + 10_000, sign * 21.0, 0.0, true);
+            s.at(s.now + 10_000, sign * 25.0, 0.0, true);
             assert_eq!(
                 s.r.disarm_reason,
                 Some(policy::DisarmReason::Fault(balance::Fault::Tilt))
@@ -521,7 +521,7 @@ fn control_21_degree_boundary_stops_actual_outputs_for_all_authorities() {
             .unwrap()
             .control
             .tilt_limit(),
-        21.0
+        25.0
     );
     assert_eq!(
         Response::new(
@@ -540,11 +540,11 @@ fn control_21_degree_boundary_stops_actual_outputs_for_all_authorities() {
     );
     assert_eq!(
         balance::CONTROL_FALL_ANGLE_DEG - restart_assist::recovery::CUTOFF_MARGIN,
-        18.0
+        22.0
     );
 }
 #[test]
-fn recovery_now_accepts_12_to_18_margin_range_and_rejects_18() {
+fn recovery_accepts_13_degree_trend_and_rejects_22_degree_margin() {
     use restart_assist::recovery::{Decision, Reason, Recovery};
     let mut r = Recovery::new();
     let mut decision = Decision::Ordinary;
@@ -564,7 +564,7 @@ fn recovery_now_accepts_12_to_18_margin_range_and_rejects_18() {
     assert_eq!(decision, Decision::Probe);
     let mut r = Recovery::new();
     r.update(
-        input(0, 18.0, 5.0),
+        input(0, 22.0, 5.0),
         true,
         true,
         true,
@@ -776,7 +776,7 @@ fn capped_probe_projection_excludes_200ms_but_useful_probe_keeps_it() {
     for mapped in [45.0, 48.0, 50.0] {
         let mut a = initialized(true);
         for n in 0..=10 {
-            fixed_mapped_step(&mut a, 610_000 + n * 10_000, 15.7 + n as f32 * 0.05, mapped);
+            fixed_mapped_step(&mut a, 610_000 + n * 10_000, 19.7 + n as f32 * 0.05, mapped);
         }
         let o = a.status(710_000);
         assert_eq!(o.recovery.unwrap().attempted, mapped == 50.0);

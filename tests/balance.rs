@@ -103,7 +103,7 @@ fn stale_invalid_time_and_trial_expiry_stop_active_control() {
     assert_eq!(c.state(), State::Fault(Fault::Timing));
     let mut c = ready(true);
     c.request(Request::Arm, 600_000).unwrap();
-    for i in 1..=100 {
+    for i in 1..=MAX_ACTIVE_US / 20_000 {
         c.sample(0.0, 0.0, 600_000 + i * 20_000);
         c.tick(600_000 + i * 20_000);
     }
@@ -256,9 +256,9 @@ fn automatic_dry_startup_needs_no_upright_pose_or_serial_and_never_grants_live()
 }
 
 #[test]
-fn control_profile_cutoff_is_21_inclusive_and_latched_without_changing_default() {
+fn control_profile_cutoff_is_25_inclusive_and_latched_without_changing_default() {
     assert_eq!(FALL_ANGLE_DEG, 15.0);
-    assert_eq!(CONTROL_FALL_ANGLE_DEG, 21.0);
+    assert_eq!(CONTROL_FALL_ANGLE_DEG, 25.0);
     for sign in [1.0, -1.0] {
         let mut c = Controller::new(Settings::default(), true, true)
             .unwrap()
@@ -268,14 +268,14 @@ fn control_profile_cutoff_is_21_inclusive_and_latched_without_changing_default()
             c.sample(0.0, 0.0, t);
         }
         c.request(Request::Arm, 600_000).unwrap();
-        c.sample(sign * 20.999, 0.0, 620_000);
+        c.sample(sign * 24.999, 0.0, 620_000);
         assert_eq!(c.state(), State::Active);
-        c.sample(sign * 21.0, 0.0, 640_000);
+        c.sample(sign * 25.0, 0.0, 640_000);
         assert_eq!(c.state(), State::Fault(Fault::Tilt));
         c.sample(0.0, 0.0, 660_000);
         assert_eq!(c.state(), State::Fault(Fault::Tilt));
     }
-    for limit in [f32::NAN, f32::INFINITY, 0.0, 21.001] {
+    for limit in [f32::NAN, f32::INFINITY, 0.0, 25.001] {
         assert!(
             Controller::new(Settings::default(), true, true)
                 .unwrap()

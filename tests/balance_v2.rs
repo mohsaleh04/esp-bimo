@@ -15,15 +15,15 @@ use controller::{Controller, Fault};
 #[test]
 fn pd_uses_angle_and_rate_with_deadband_and_signed_wheel_commands() {
     let mut controller = Controller::new(0);
-    let neutral = controller.preview(2.4, 0.0, true, 10_000).unwrap();
-    assert_eq!(neutral.pd, 2);
+    let neutral = controller.preview(1.6, 0.0, true, 10_000).unwrap();
+    assert_eq!(neutral.pd, 1);
     assert_eq!(neutral.wheels, [0, 0]);
     for sign in [1.0, -1.0] {
         let output = controller
             .preview(sign * 2.5, sign * 13.0, true, 20_000)
             .unwrap();
-        assert_eq!(output.pd, (sign * 3.0) as i16);
-        assert_eq!(output.wheels, [(sign * 16.0) as i16; 2]);
+        assert_eq!(output.pd, (sign * 4.0) as i16);
+        assert_eq!(output.wheels, [(sign * 21.0) as i16; 2]);
         assert_eq!(
             output.direction_inputs,
             if sign > 0.0 {
@@ -42,8 +42,8 @@ fn pd_and_pwm_saturate_in_both_directions_below_tilt_cutoff() {
         let output = controller
             .preview(sign * 20.0, sign * 200.0, true, 10_000)
             .unwrap();
-        assert_eq!(output.pd, (sign * 15.0) as i16);
-        assert_eq!(output.wheels, [(sign * 35.0) as i16; 2]);
+        assert_eq!(output.pd, (sign * 10.0) as i16);
+        assert_eq!(output.wheels, [(sign * 45.0) as i16; 2]);
     }
 }
 

@@ -1069,7 +1069,7 @@ mod arbiter_tests {
         let mut s = Trial::new(true);
         s.initial(1.0);
         s.hold(10, 12.0);
-        assert_eq!(s.m.motor.outputs.1, 48); // PD14 ordinary proportional mapping.
+        assert_eq!(s.m.motor.outputs.1, 45); // Kp=1.0: PD12 maps to 45% after integer conversion.
         s.hold(120, 0.0);
         s.hold(3, 3.0);
         s.hold(10, 3.0);

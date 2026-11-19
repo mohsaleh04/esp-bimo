@@ -1,7 +1,7 @@
 # Balance V2 one-shot feedback experiment
 
 `balance-v2-test` remains a separate DRY-only binary. The
-`balance-v2-live` target requires its own Cargo feature and source-level opt-in. The source defaults to `V2_LIVE_AUTHORIZED = false`.
+`balance-v2-live` target requires its own Cargo feature and source-level opt-in. The current source has `V2_LIVE_AUTHORIZED = true`.
 There is no serial input or button authorization.
 
 ```sh
@@ -19,14 +19,14 @@ while the LIVE build remains installed.** Completion latches only for the
 current boot. Keep an independent physical motor-power disconnect within reach
 and disconnect VM before resetting or reflashing.
 
-The binary shares the V2 PD and PWM preview code: Kp 1.0, Kd 0.08, PD
-clamped to ±15, deadband ±2, and normal duty mapped to 15–35%. It uses the
-production TB6612 driver, whose hardware ceiling is set to 35% here.
+The binary shares the V2 PD and PWM preview code: Kp 1.2, Kd 0.08, PD
+clamped to ±10, deadband ±1, and normal duty mapped to 10–45%. It uses the
+production TB6612 driver, whose hardware ceiling is set to 45% here.
 There is no Kick or restart/recovery assist.
 
 The arming deadline is 10 seconds. Arming requires 500 ms of consecutive fresh gravity-corrected measurements
 within ±5° and ±5°/s, followed by a new upright estimate with zero mapped PWM.
-The neutral sample sends zero. The active window lasts up to two seconds,
+The neutral sample sends zero. The active window lasts up to 180 seconds,
 then disarms and latches completion.
 
 Each fresh valid estimate yields a new PD command. Empty polls do not resend
