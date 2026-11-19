@@ -3,7 +3,7 @@ use super::{controller::Fault, motor_control::DualMotor};
 use crate::balance;
 
 pub(super) const MOTOR_CEILING: u8 = super::controller::PWM_CEILING;
-const ACTIVE_US: u64 = 20_000_000;
+const ACTIVE_US: u64 = 180_000_000;
 const ARMING_US: u64 = 10_000_000;
 const REVERSAL_ZERO_US: u64 = 100_000;
 

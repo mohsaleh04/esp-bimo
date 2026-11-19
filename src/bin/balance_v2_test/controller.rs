@@ -3,20 +3,20 @@ use super::motor_control::{Channel, DutyLimit};
 use crate::{balance, pwm_mapping};
 
 const PD: balance::Settings = balance::Settings {
-    kp: 1.0,
+    kp: 1.2,
     kd: 0.08,
     output_limit: 10,
 };
-pub(super) const PWM_CEILING: u8 = 30;
+pub(super) const PWM_CEILING: u8 = 45;
 const PWM: pwm_mapping::Config = pwm_mapping::Config {
     enabled: true,
-    deadband: 2.0,
+    deadband: 1.0,
     pd_output_limit: PD.output_limit as f32,
     minimum_duty: 10.0,
     maximum_duty: PWM_CEILING as f32,
     slew_per_second: None,
 };
-const MAX_CORRECTION_AGE_US: u64 = 25_000;
+const MAX_CORRECTION_AGE_US: u64 = 50_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Fault {
