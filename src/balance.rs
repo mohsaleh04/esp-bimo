@@ -7,7 +7,7 @@ pub const FALL_ANGLE_DEG: f32 = 15.0; // Existing standalone/response diagnostic
 pub const CONTROL_FALL_ANGLE_DEG: f32 = 25.0;
 pub const UPRIGHT_DWELL_US: u64 = 500_000;
 pub const MAX_SAMPLE_GAP_US: u64 = 40_000;
-pub const MAX_ACTIVE_US: u64 = 2_000_000; // Short first experiments, never unattended.
+pub const MAX_ACTIVE_US: u64 = 20_000_000; // Short first experiments, never unattended.
 
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
@@ -18,7 +18,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            kp: 1.2,
+            kp: 1.0,
             kd: 0.08,
             output_limit: 15,
         }
