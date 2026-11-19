@@ -20,7 +20,7 @@ use log::{info, warn};
 
 #[path = "balance_test/calibration.rs"]
 mod calibration;
-#[path = "balance_v2_test/controller.rs"]
+#[path = "../balance_v2/controller.rs"]
 mod controller;
 use controller::{Controller, Fault};
 

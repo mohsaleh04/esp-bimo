@@ -1,7 +1,7 @@
 #[allow(dead_code)]
 #[path = "../src/balance.rs"]
 mod balance;
-#[path = "../src/bin/balance_v2_test/controller.rs"]
+#[path = "../src/balance_v2/controller.rs"]
 mod controller;
 #[allow(dead_code)]
 #[path = "../src/motors/control.rs"]
