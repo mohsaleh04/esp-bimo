@@ -1,4 +1,4 @@
-//! Pure DRY controller. Its output is telemetry, with no motor handle.
+//! Shared balance feedback calculation and sample validation.
 use super::motor_control::{Channel, DutyLimit};
 use crate::{balance, pwm_mapping};
 
@@ -9,12 +9,10 @@ const PD: balance::Settings = balance::Settings {
 };
 pub(super) const PWM_CEILING: u8 = 45;
 const PWM: pwm_mapping::Config = pwm_mapping::Config {
-    enabled: true,
     deadband: 1.0,
     pd_output_limit: PD.output_limit as f32,
     minimum_duty: 10.0,
     maximum_duty: PWM_CEILING as f32,
-    slew_per_second: None,
 };
 const MAX_CORRECTION_AGE_US: u64 = 50_000;
 
@@ -126,7 +124,7 @@ impl Controller {
         if !pitch_deg.is_finite() || !rate_dps.is_finite() {
             return Err(self.fail(Fault::InvalidEstimate));
         }
-        if pitch_deg.abs() >= balance::CONTROL_FALL_ANGLE_DEG {
+        if pitch_deg.abs() >= balance::TILT_CUTOFF_DEG {
             return Err(self.fail(Fault::Tilt));
         }
         if accel_used {

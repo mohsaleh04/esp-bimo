@@ -26,7 +26,3 @@ macro_rules! motor_gpio {
         $p.GPIO40
     };
 }
-
-/// Older motor probes stay dry while the TB6612 wiring is being verified.
-/// This is a source-level lockout, independent of Cargo feature selection.
-pub const TB6612_LEGACY_PROBES_LIVE: bool = false;

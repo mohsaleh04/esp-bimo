@@ -1,18 +1,20 @@
-# Balance V2 one-shot feedback experiment
+# Live balance
 
-`balance-v2-test` remains a separate DRY-only binary. The
-`balance-v2-live` target requires its own Cargo feature and source-level opt-in. The current source has `V2_LIVE_AUTHORIZED = true`.
-There is no serial input or button authorization.
+The current Balance V2 firmware demonstrated self-balancing on Bimo with
+its independent 2S motor supply. Build the live image without flashing with
+`cargo build --release --locked --bin balance-v2-live --features balance-v2-live`.
+The separate dry image is available through
+`cargo run --release --locked --bin balance-v2-test`.
+
+To flash the live image explicitly:
 
 ```sh
 cargo run --release --locked --target xtensa-esp32s3-none-elf --bin balance-v2-live --features balance-v2-live
 ```
 
 This invokes the project's `espflash flash --monitor --chip esp32s3` runner.
-With the source gate closed it rejects startup. With the gate open it runs
-BMI160 calibration and the five-second upright preparation automatically.
-The feedback session starts automatically after preparation, with motors
-disarmed until the arming conditions pass.
+It runs BMI160 calibration and the five-second upright preparation
+automatically. Motors remain disarmed until the arming conditions pass.
 
 **A reset or reboot, including a watchdog reset, can restart the whole sequence
 while the LIVE build remains installed.** Completion latches only for the
@@ -38,16 +40,15 @@ measured from a completed zero command. A 100 ms watchdog is a reset fallback
 during the active window. A zero command allows the wheels to coast.
 A watchdog reset cannot replace the independent power disconnect.
 
-## Validation stages for a future powered trial
+## Hardware revalidation
 
 1. **Electrical validation.** Keep VM disconnected for USB/DRY setup. Use a
    verified regulated motor supply at or below the nominal 6 V motor rating
    and a verified hardware current limit appropriate to the actual TT motors
    and TB6612 module. Verify VM, VCC, common ground, continuity, the STBY
    pull-down at reset and startup current. Provide an independent, accessible
-   motor-power cutoff. The present approximately 9 V adapter without
-   measurements does not qualify. Low PWM duty does not cap on-pulse voltage
-   or peak current.
+   motor-power cutoff. Low PWM duty does not cap on-pulse voltage or peak current.
+   Verify the actual VM under load with the battery setup being used.
 2. **Suspended-wheel polarity.** After electrical validation, use the separate
    one-wheel [direction diagnostic](tb6612_diagnostics.md) with both wheels
    securely suspended. Check A=left, B=right and that positive commands
@@ -60,8 +61,8 @@ A watchdog reset cannot replace the independent power disconnect.
    Keep the motor cutoff within reach. Start upright and apply a small
    supported perturbation while watching that wheels move in
    the corrective direction. Cut motor power for wrong direction, unexpected
-   movement, or loss of control/telemetry. Restore the source gate to false
-   after the trial. This procedure does not authorize unsupported balancing.
+   movement, or loss of control/telemetry. Reflash the disarmed default
+   firmware with VM disconnected to end live testing.
 
 Host tests simulate the motor interface. They cannot establish actual
 electrical limits, pulse timing, mechanical polarity, or fault shutdown

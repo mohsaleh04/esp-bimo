@@ -22,66 +22,21 @@ tb6612-diagnostic-motor-test = ["tb6612-diagnostic"]
 tb6612-live = []
 tb6612-both = ["tb6612-live"]
 servo-full-sweep = []
-motor-test = []
-motor-pwm-diagnostic = []
 motor-duty-characterization = []
 motor-continuation-characterization = []
 motor-kick-diagnostic = []
 motor-kick-live = ["motor-kick-diagnostic"]
 orientation-diagnostic = []
-balance-test = []
-balance-v2-test = []
 balance-v2-live = []
-balance-live = ["balance-test"]
-balance-motor-response-test = ["balance-test"]
-balance-motor-response-live = ["balance-motor-response-test"]
-balance-ground-contact-test = ["balance-test"]
-balance-ground-contact-live = ["balance-ground-contact-test"]
-
-balance-bidirectional-ground-test = ["balance-test"]
-balance-bidirectional-ground-live = ["balance-bidirectional-ground-test"]
-
-balance-control-test = ["balance-test"]
-balance-control-live = ["balance-control-test"]
-balance-control-restart-assist = ["balance-control-test"]
-balance-control-rolling-assist = ["balance-control-test"]
-balance-control-recovery-assist = ["balance-control-rolling-assist"]
-balance-control-short-recovery-zero = ["balance-control-recovery-assist"]
 
 [[bin]]
 name = "balance-v2-test"
 path = "src/bin/balance_v2_test.rs"
-required-features = ["balance-v2-test"]
 
 [[bin]]
 name = "balance-v2-live"
 path = "src/bin/balance_v2_live.rs"
 required-features = ["balance-v2-live"]
-
-[[bin]]
-name = "balance-control-test"
-path = "src/bin/balance_control_test.rs"
-required-features = ["balance-control-test"]
-
-[[bin]]
-name = "balance-bidirectional-ground-test"
-path = "src/bin/balance_bidirectional_ground_test.rs"
-required-features = ["balance-bidirectional-ground-test"]
-
-[[bin]]
-name = "motor-test"
-path = "src/bin/motor_test.rs"
-required-features = ["motor-test"]
-
-[[bin]]
-name = "motor-pwm-test"
-path = "src/bin/motor_pwm_test.rs"
-required-features = ["motor-test"]
-
-[[bin]]
-name = "motor-pwm-diagnostic"
-path = "src/bin/motor_pwm_diagnostic.rs"
-required-features = ["motor-pwm-diagnostic"]
 
 [[bin]]
 name = "motor-kick-diagnostic"
@@ -92,21 +47,6 @@ required-features = ["motor-kick-diagnostic"]
 name = "orientation-diagnostic"
 path = "src/bin/orientation_diagnostic.rs"
 required-features = ["orientation-diagnostic"]
-
-[[bin]]
-name = "balance-test"
-path = "src/bin/balance_test.rs"
-required-features = ["balance-test"]
-
-[[bin]]
-name = "balance-motor-response-test"
-path = "src/bin/balance_motor_response_test.rs"
-required-features = ["balance-motor-response-test"]
-
-[[bin]]
-name = "balance-ground-contact-test"
-path = "src/bin/balance_ground_contact_test.rs"
-required-features = ["balance-ground-contact-test"]
 
 [dependencies]
 libm = "=0.2.16"

@@ -29,7 +29,7 @@ const TEST: Settings = Settings {
 const PREPARATION_SECS: u64 = 3;
 const TRIAL_PAUSE_MS: u64 = 2_000;
 const MOTOR_PAUSE_MS: u64 = 3_000;
-const LIVE: bool = cfg!(feature = "motor-kick-live"); // balance-live has no effect.
+const LIVE: bool = cfg!(feature = "motor-kick-live");
 
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) -> ! {

@@ -76,8 +76,7 @@ Calling `command` while disarmed first stops both channels and returns
 stops before opening the command gate; it never starts motion on its own.
 The normal main has a 30% ceiling but leaves the gate closed permanently.
 There is no automatic expiry of general API commands: an armed application
-must explicitly stop/disarm. Only the separate physical-test program implements
-the short pulse deadline described below.
+must explicitly stop/disarm. Balance and the powered diagnostics enforce their own session or pulse deadlines.
 
 `stop()` lowers STBY, preloads both enable GPIO latches LOW, disconnects PWM through the
 GPIO matrix, then clears the direction inputs and PWM compare values. It has
@@ -94,23 +93,20 @@ measures voltage/current. A duty ceiling is not a current limit or an RPM limit.
 
 ## Hardware and diagnostics
 
-See the [TB6612 readiness notes](tb6612-balance-readiness.md) for the
-shared LIVE gate and the remaining hardware checks. The legacy static and
-MCPWM probes are locked to DRY. The isolated [logic and no-load diagnostic](tb6612-diagnostic.md)
-documents the TB6612-specific wiring and measurements.
+See [live balance](balance-v2-live.md) for arming and shutdown behavior.
+Use the [logic and no-load diagnostic](tb6612-diagnostic.md) for wiring
+and electrical measurements, and the [suspended-wheel diagnostic](tb6612_diagnostics.md)
+for physical direction checks.
 
 ## Software validation
 
 ```sh
 cargo fmt --check
-cargo check --locked
-cargo build --locked --bins --features motor-test
-cargo build --release --locked --bins --features motor-test
-cargo clippy --locked --all-features --bins --lib -- -D warnings
-rustc +stable --edition=2024 --test tests/motor_control.rs -o /tmp/esp-bimo-motor-tests
-/tmp/esp-bimo-motor-tests
-rustc +stable --edition=2024 --test tests/imu_sample.rs -o /tmp/esp-bimo-imu-tests
-/tmp/esp-bimo-imu-tests
+cargo check --locked --bins
+for test in motor_control imu_sample motor_kick tb6612_direction_authorization tb6612_no_load; do
+    rustc +stable --edition=2024 --test "tests/${test}.rs" -o "/tmp/esp-bimo-${test}" &&
+        "/tmp/esp-bimo-${test}"
+done
 ```
 
 Host tests exercise production mapping, direction-input truth table, duty
@@ -118,5 +114,3 @@ validation/clamping, signed extremes, and gate behavior. They do not validate GP
 stopping under electrical faults, or the actual motors.
 Those remain explicit, pending real-hardware checks. Target builds and HAL
 source inspection support the ownership/routing design, not hardware proof.
-
-The legacy static and MCPWM probes are DRY during TB6612 wiring verification. A=LEFT and B=RIGHT are the intended TB6612 labels, pending physical confirmation.

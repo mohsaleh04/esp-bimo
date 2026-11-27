@@ -18,7 +18,7 @@ use esp_hal::{
 };
 use log::{info, warn};
 
-#[path = "balance_test/calibration.rs"]
+#[path = "../balance_v2/calibration.rs"]
 mod calibration;
 #[path = "../balance_v2/controller.rs"]
 mod controller;

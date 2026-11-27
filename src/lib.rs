@@ -15,6 +15,6 @@ pub mod pwm_mapping;
 
 pub mod eyes;
 
+pub mod hc_sr04;
 pub mod head_servo;
 pub mod oled;
-pub mod hc_sr04;

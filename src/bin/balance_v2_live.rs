@@ -1,4 +1,4 @@
-//! Independently gated, one-shot V2 feedback experiment.
+//! One-shot live balance firmware.
 #![no_std]
 #![no_main]
 
@@ -24,7 +24,7 @@ use esp_hal::{
 };
 use log::{info, warn};
 
-#[path = "balance_test/calibration.rs"]
+#[path = "../balance_v2/calibration.rs"]
 mod calibration;
 #[path = "../balance_v2/controller.rs"]
 mod controller;
@@ -35,8 +35,6 @@ use session::{MOTOR_CEILING, Session, State, Stop};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-// Review the supply, restraint, cutoff and intended test stage before changing this.
-const V2_LIVE_AUTHORIZED: bool = true;
 const MAX_LOOP_US: u64 = 30_000;
 
 #[esp_rtos::main]
@@ -45,13 +43,6 @@ async fn main(_spawner: Spawner) -> ! {
         esp_hal::Config::default().with_cpu_clock(CpuClock::max()),
     ));
     esp_println::logger::init_logger_from_env();
-    if !V2_LIVE_AUTHORIZED {
-        warn!("Balance V2 LIVE rejected: source authorization is false; motor GPIOs remain LOW.");
-        loop {
-            core::hint::spin_loop();
-        }
-    }
-
     let mut bus = board.i2c;
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
     let timers = TimerGroup::new(board.timer_group);

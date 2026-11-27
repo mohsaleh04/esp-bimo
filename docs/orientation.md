@@ -4,8 +4,7 @@ This is a sensor-only diagnostic. **There is no PD/PID, balance control, arm
 call, motor driver or PWM initialization.** It retains the six inactive motor
 GPIO owners for the whole task; STBY, PWMA/PWMB and the four direction pins stay LOW. Disconnect motor
 battery power during this test. The buzzer input stays HIGH/inactive so sound
-and vibration do not disturb calibration. Normal firmware, buzzer implementation,
-BMI160 driver, and both motor-test binaries are unchanged.
+and vibration do not disturb calibration. The orientation diagnostic uses the same BMI160 driver as the default firmware.
 
 ## Existing sensor setup and what is unknown
 
@@ -205,8 +204,7 @@ When you explicitly choose to flash and run the axis-identification experiment:
 cargo run --release --locked --features orientation-diagnostic --bin orientation-diagnostic
 ```
 
-This is a different binary from either motor-test program. Do not select a
-motor-test binary for this experiment. The agent has not flashed anything.
+The orientation binary keeps motor outputs inactive throughout the diagnostic.
 
 ## Software checks and files
 
